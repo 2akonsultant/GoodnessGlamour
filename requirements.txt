@@ -1,0 +1,22 @@
+google-generativeai>=0.3.0
+
+# Voice and Speech Recognition
+SpeechRecognition>=3.10.0
+pyttsx3>=2.90
+
+# Vector Database and RAG
+chromadb>=0.4.0
+openai>=1.0.0
+
+# Web Framework and Twilio Integration
+flask>=2.3.0
+twilio>=8.5.0
+
+# Data Processing
+pandas>=2.0.0
+openpyxl>=3.1.0
+
+# Utilities
+python-dotenv>=1.0.0
+requests>=2.31.0
+
