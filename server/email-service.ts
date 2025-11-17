@@ -29,20 +29,69 @@ export interface BookingData {
 
 // Email configuration
 const createTransporter = async () => {
-  const emailUser = (process.env.EMAIL_USER || '2akonsultant@gmail.com').trim();
-  const emailPasswordRaw = process.env.EMAIL_PASSWORD || 'dcjm mwzk dwie uoxp';
+  // Support both EMAIL_* and SMTP_* environment variables
+  const emailUser = (process.env.EMAIL_USER || process.env.SMTP_USER || '2akonsultant@gmail.com').trim();
+  const emailPasswordRaw = process.env.EMAIL_PASSWORD || process.env.SMTP_PASS || 'dcjm mwzk dwie uoxp';
   const emailPassword = emailPasswordRaw.replace(/\s+/g, '');
   
   console.log(`📧 Creating email transporter with user: ${emailUser}`);
   console.log(`📧 Password provided: ${emailPassword ? 'Yes (length: ' + emailPassword.length + ')' : 'No'}`);
+  console.log(`📧 Environment: ${process.env.NODE_ENV || 'development'}`);
   
-  const transporter = nodemailer.createTransport({
-    service: 'gmail',
-    auth: {
-      user: emailUser,
-      pass: emailPassword, // Gmail App Password
-    },
-  });
+  // Check if using custom SMTP server or Gmail
+  const smtpHost = process.env.SMTP_HOST;
+  const smtpPort = process.env.SMTP_PORT ? parseInt(process.env.SMTP_PORT, 10) : null;
+  
+  let transporter: nodemailer.Transporter;
+  
+  if (smtpHost && smtpPort) {
+    // Use custom SMTP server configuration
+    console.log(`📧 Using custom SMTP server: ${smtpHost}:${smtpPort}`);
+    transporter = nodemailer.createTransport({
+      host: smtpHost,
+      port: smtpPort,
+      secure: smtpPort === 465, // true for 465, false for other ports
+      auth: {
+        user: emailUser,
+        pass: emailPassword,
+      },
+      // Production-friendly connection settings for Render and other cloud platforms
+      connectionTimeout: 10000, // 10 seconds
+      greetingTimeout: 5000, // 5 seconds
+      socketTimeout: 10000, // 10 seconds
+      // Retry settings
+      tls: {
+        rejectUnauthorized: false, // Accept self-signed certificates if needed
+      },
+      // Pool connections for better performance
+      pool: true,
+      maxConnections: 1,
+      maxMessages: 3,
+    });
+  } else {
+    // Use Gmail service with enhanced production settings
+    console.log(`📧 Using Gmail service`);
+    transporter = nodemailer.createTransport({
+      service: 'gmail',
+      auth: {
+        user: emailUser,
+        pass: emailPassword, // Gmail App Password
+      },
+      // Production-friendly connection settings for Render and other cloud platforms
+      connectionTimeout: 10000, // 10 seconds - important for cloud environments
+      greetingTimeout: 5000, // 5 seconds
+      socketTimeout: 10000, // 10 seconds
+      // Retry settings
+      secure: true, // Use TLS
+      tls: {
+        rejectUnauthorized: false, // Some cloud providers need this
+      },
+      // Pool connections for better performance
+      pool: true,
+      maxConnections: 1,
+      maxMessages: 3,
+    });
+  }
   
   // Verify transporter configuration before returning
   try {
@@ -53,15 +102,27 @@ const createTransporter = async () => {
     if (error instanceof Error) {
       console.error('❌ Error message:', error.message);
       console.error('❌ Error code:', (error as any).code);
-      if (error.message.includes('Invalid login')) {
+      
+      // Provide helpful error messages for common issues
+      if (error.message.includes('Invalid login') || error.message.includes('EAUTH')) {
         console.error('❌ AUTHENTICATION ERROR: Invalid email or password. Please check:');
         console.error('   1. Email address is correct');
         console.error('   2. You are using a Gmail App Password (not your regular password)');
         console.error('   3. 2-Step Verification is enabled on your Google account');
         console.error('   4. App Password was generated for "Mail"');
+        console.error('   5. Environment variables EMAIL_USER and EMAIL_PASSWORD are set correctly in Render');
       } else if (error.message.includes('Less secure app')) {
         console.error('❌ SECURITY ERROR: Gmail is blocking the connection.');
         console.error('   Solution: Use a Gmail App Password instead of your regular password.');
+      } else if (error.message.includes('ETIMEDOUT') || error.message.includes('timeout')) {
+        console.error('❌ NETWORK ERROR: Connection timeout. This might be due to:');
+        console.error('   1. Firewall blocking SMTP ports on Render');
+        console.error('   2. Network restrictions in your cloud environment');
+        console.error('   3. Gmail rate limiting. Try again later.');
+      } else if (error.message.includes('ECONNREFUSED')) {
+        console.error('❌ CONNECTION ERROR: Cannot connect to SMTP server. Check:');
+        console.error('   1. SMTP_HOST and SMTP_PORT are correct');
+        console.error('   2. Network connectivity from Render to SMTP server');
       }
     }
     throw error; // Re-throw to prevent sending emails with invalid credentials
