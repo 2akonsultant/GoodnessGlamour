@@ -14,6 +14,12 @@ services:
         sync: false
       - key: GOOGLE_CLIENT_ID
         sync: false
+      # Email Configuration (Required for email services)
+      - key: EMAIL_USER
+        sync: false
+      - key: EMAIL_PASSWORD
+        sync: false
+      # Alternative SMTP Configuration (optional, for custom SMTP servers)
       - key: SMTP_HOST
         sync: false
       - key: SMTP_PORT
