@@ -1,1087 +1,288 @@
-import nodemailer from 'nodemailer';
-import XLSX from 'xlsx';
-import * as fs from 'fs';
-import * as path from 'path';
-import { sendBookingConfirmationSMS } from './sms-service';
+import { GoogleGenerativeAI } from "@google/generative-ai";
 
-export interface ContactMessage {
-  name: string;
-  phone: string;
-  serviceInterest: string;
-  address: string;
-  message: string;
-  timestamp: string;
-}
+// Salon context for the AI
+const SALON_CONTEXT = `
+You are a helpful AI assistant that can answer questions on any topic. You are also knowledgeable about Goodness Glamour Salon, a premium ladies and kids salon offering doorstep beauty services.
 
-export interface BookingData {
-  id: string;
-  customerName: string;
-  customerEmail: string;
-  customerPhone: string;
-  customerAddress: string;
-  appointmentDate: string;
-  appointmentTime: string;
-  services: string[];
-  totalAmount: number;
-  notes: string;
-  timestamp: string;
-}
+SALON INFORMATION:
+- Name: Goodness Glamour Salon
+- Contact: 9036626642
+- Email: 2akonsultant@gmail.com
+- Service Hours: Monday - Sunday, 9:00 AM - 8:00 PM
+- Service Type: We provide doorstep services across the city
+- Location: City-wide doorstep services available
 
-// Email configuration - supports both EMAIL_PASSWORD and EMAIL_PASS
-const getEmailPassword = () => process.env.EMAIL_PASSWORD || process.env.EMAIL_PASS || '';
+SERVICES & PRICES:
 
-const createTransporter = () => {
-  const user = process.env.EMAIL_USER || '2akonsultant@gmail.com';
-  const pass = getEmailPassword();
-
-  if (!pass || pass.trim() === '') {
-    console.error('❌ EMAIL_PASSWORD (or EMAIL_PASS) is not set in .env. Booking emails will not be sent.');
-    console.error('   Add to .env: EMAIL_PASSWORD=your-gmail-app-password');
-    console.error('   Gmail requires App Password (not regular password). Generate at: https://myaccount.google.com/apppasswords');
-  }
-
-  // Use explicit SMTP config - port 587 with STARTTLS works better on many hosts (Render, Vercel, etc.)
-  const transporter = nodemailer.createTransport({
-    host: 'smtp.gmail.com',
-    port: 587,
-    secure: false,
-    auth: {
-      user,
-      pass,
-    },
-    requireTLS: true,
-    connectionTimeout: 10000,
-    greetingTimeout: 10000,
-  });
-
-  return transporter;
-};
-
-// Send email notification
-export async function sendContactEmail(contact: ContactMessage): Promise<boolean> {
-  try {
-    const transporter = createTransporter();
-
-    const mailOptions = {
-      from: process.env.EMAIL_USER || '2akonsultant@gmail.com',
-      to: '2akonsultant@gmail.com',
-      subject: `💐 New Inquiry from ${contact.name} | Goodness Glamour Salon`,
-      html: `
-        <!DOCTYPE html>
-        <html>
-        <head>
-          <meta charset="UTF-8">
-          <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        </head>
-        <body style="margin: 0; padding: 0; background: linear-gradient(135deg, #fef5f1 0%, #fef9f5 50%, #f5f3f9 100%); font-family: 'Georgia', 'Times New Roman', serif;">
-          
-          <!-- Main Container -->
-          <table width="100%" cellpadding="0" cellspacing="0" style="background: linear-gradient(135deg, #fef5f1 0%, #fef9f5 50%, #f5f3f9 100%); padding: 40px 20px;">
-            <tr>
-              <td align="center">
-                
-                <!-- Email Content -->
-                <table width="620" cellpadding="0" cellspacing="0" style="background-color: #ffffff; border-radius: 24px; overflow: hidden; box-shadow: 0 8px 32px rgba(0,0,0,0.08);">
-                  
-                  <!-- Elegant Header -->
-                  <tr>
-                    <td style="background: linear-gradient(135deg, #ffeef5 0%, #fff0f3 50%, #f9f0ff 100%); padding: 50px 40px 40px 40px; text-align: center; position: relative;">
-                      <!-- Subtle floral corner accent -->
-                      <div style="position: absolute; top: 15px; right: 15px; opacity: 0.15; font-size: 40px;">🌸</div>
-                      <div style="position: absolute; bottom: 15px; left: 15px; opacity: 0.15; font-size: 40px;">🌿</div>
-                      
-                      <h1 style="margin: 0; color: #d4a5a5; font-size: 36px; font-weight: 300; letter-spacing: 3px; font-family: 'Georgia', serif;">
-                        Goodness Glamour
-                      </h1>
-                      <p style="margin: 8px 0 0 0; color: #b8a0a0; font-size: 15px; font-weight: 400; letter-spacing: 2px; font-family: 'Georgia', serif;">
-                        Ladies & Kids Salon
-                      </p>
-                      <div style="margin-top: 25px; padding: 10px 30px; background-color: rgba(255,255,255,0.7); border-radius: 20px; display: inline-block; border: 1px solid rgba(212,165,165,0.2);">
-                        <p style="margin: 0; color: #c9a0a0; font-size: 13px; font-weight: 500; letter-spacing: 1px;">
-                          💐 New Customer Inquiry
-                        </p>
-                      </div>
-                    </td>
-                  </tr>
-                  
-                  <!-- Content Section -->
-                  <tr>
-                    <td style="padding: 40px;">
-                      
-                      <!-- Customer Name Card -->
-                      <div style="background: linear-gradient(135deg, #fff5f0 0%, #fff8f5 100%); padding: 25px 30px; border-radius: 18px; margin-bottom: 30px; border: 1px solid #ffe8e0; box-shadow: 0 4px 16px rgba(255,200,180,0.1);">
-                        <table width="100%" cellpadding="0" cellspacing="0">
-                          <tr>
-                            <td width="60" valign="middle">
-                              <div style="width: 55px; height: 55px; background: linear-gradient(135deg, #ffd4c8 0%, #ffc4b8 100%); border-radius: 50%; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 12px rgba(255,180,160,0.25);">
-                                <span style="font-size: 26px;">✨</span>
-                              </div>
-                            </td>
-                            <td style="padding-left: 20px;">
-                              <h2 style="margin: 0; color: #c88080; font-size: 26px; font-weight: 400; font-family: 'Georgia', serif;">${contact.name}</h2>
-                              <p style="margin: 5px 0 0 0; color: #d4a5a5; font-size: 14px; font-weight: 400; letter-spacing: 0.5px;">New Inquiry Received</p>
-                            </td>
-                          </tr>
-                        </table>
-                      </div>
-                      
-                      <!-- Contact Information -->
-                      <div style="background: linear-gradient(135deg, #f8f5ff 0%, #faf7ff 100%); padding: 30px; border-radius: 18px; margin-bottom: 30px; border: 1px solid #f0e8ff; box-shadow: 0 4px 16px rgba(200,180,220,0.08);">
-                        <h3 style="margin: 0 0 25px 0; color: #a88cb8; font-size: 16px; font-weight: 500; letter-spacing: 1px; font-family: 'Georgia', serif; border-bottom: 1px solid rgba(200,180,220,0.2); padding-bottom: 12px;">
-                          Contact Details
-                        </h3>
-                        
-                        <!-- Phone -->
-                        <div style="background-color: #ffffff; padding: 18px 20px; border-radius: 14px; margin-bottom: 15px; border-left: 3px solid #d4b5d4; box-shadow: 0 2px 8px rgba(0,0,0,0.03);">
-                          <table width="100%" cellpadding="0" cellspacing="0">
-                            <tr>
-                              <td width="35" valign="middle">
-                                <span style="font-size: 20px; opacity: 0.7;">📱</span>
-                              </td>
-                              <td>
-                                <p style="margin: 0 0 4px 0; color: #b8a0b8; font-size: 11px; font-weight: 500; text-transform: uppercase; letter-spacing: 1px;">Phone Number</p>
-                                <a href="tel:${contact.phone}" style="margin: 0; color: #c88080; font-size: 19px; font-weight: 500; text-decoration: none; display: block; font-family: 'Georgia', serif;">${contact.phone}</a>
-                              </td>
-                            </tr>
-                          </table>
-                        </div>
-                        
-                        <!-- Service -->
-                        <div style="background-color: #ffffff; padding: 18px 20px; border-radius: 14px; margin-bottom: 15px; border-left: 3px solid #d4b5d4; box-shadow: 0 2px 8px rgba(0,0,0,0.03);">
-                          <table width="100%" cellpadding="0" cellspacing="0">
-                            <tr>
-                              <td width="35" valign="middle">
-                                <span style="font-size: 20px; opacity: 0.7;">💇‍♀️</span>
-                              </td>
-                              <td>
-                                <p style="margin: 0 0 4px 0; color: #b8a0b8; font-size: 11px; font-weight: 500; text-transform: uppercase; letter-spacing: 1px;">Service Interest</p>
-                                <p style="margin: 0; color: #9880a8; font-size: 16px; font-weight: 500; font-family: 'Georgia', serif;">${contact.serviceInterest}</p>
-                              </td>
-                            </tr>
-                          </table>
-                        </div>
-                        
-                        <!-- Address -->
-                        <div style="background-color: #ffffff; padding: 18px 20px; border-radius: 14px; border-left: 3px solid #d4b5d4; box-shadow: 0 2px 8px rgba(0,0,0,0.03);">
-                          <table width="100%" cellpadding="0" cellspacing="0">
-                            <tr>
-                              <td width="35" valign="top">
-                                <span style="font-size: 20px; opacity: 0.7;">📍</span>
-                              </td>
-                              <td>
-                                <p style="margin: 0 0 4px 0; color: #b8a0b8; font-size: 11px; font-weight: 500; text-transform: uppercase; letter-spacing: 1px;">Address</p>
-                                <p style="margin: 0; color: #9880a8; font-size: 15px; font-weight: 400; line-height: 1.6; font-family: 'Georgia', serif;">${contact.address}</p>
-                              </td>
-                            </tr>
-                          </table>
-                        </div>
-                      </div>
-                      
-                      <!-- Message Section -->
-                      <div style="background: linear-gradient(135deg, #f0f9f8 0%, #f5faf9 100%); padding: 30px; border-radius: 18px; margin-bottom: 30px; border: 1px solid #e0f0ed; box-shadow: 0 4px 16px rgba(180,220,210,0.08);">
-                        <h3 style="margin: 0 0 18px 0; color: #88b8a8; font-size: 16px; font-weight: 500; letter-spacing: 1px; font-family: 'Georgia', serif;">
-                          Customer Message
-                        </h3>
-                        <div style="background-color: #ffffff; padding: 22px 25px; border-radius: 14px; border-left: 3px solid #a8d4c4; box-shadow: 0 2px 8px rgba(0,0,0,0.03);">
-                          <p style="margin: 0; color: #687878; font-size: 15px; line-height: 1.8; white-space: pre-wrap; font-family: 'Georgia', serif;">${contact.message}</p>
-                        </div>
-                      </div>
-                      
-                      <!-- Action Button -->
-                      <div style="background: linear-gradient(135deg, #f5fff8 0%, #f8fff9 100%); padding: 35px 30px; border-radius: 18px; text-align: center; border: 1px solid #e8f5ed; box-shadow: 0 4px 16px rgba(180,220,200,0.1);">
-                        <p style="margin: 0 0 18px 0; color: #88b8a0; font-size: 14px; font-weight: 500; letter-spacing: 0.5px;">
-                          Please Contact Customer
-                        </p>
-                        <a href="tel:${contact.phone}" style="display: inline-block; background: linear-gradient(135deg, #b8d4c8 0%, #a8c8b8 100%); color: #ffffff; padding: 16px 45px; border-radius: 25px; text-decoration: none; font-size: 17px; font-weight: 500; box-shadow: 0 6px 20px rgba(168,200,184,0.3); font-family: 'Georgia', serif; letter-spacing: 0.5px;">
-                          📞 Call ${contact.name}
-                        </a>
-                        <p style="margin: 18px 0 0 0; color: #98b8a8; font-size: 13px; font-weight: 400;">
-                          Service: <span style="color: #88a898; font-weight: 500;">${contact.serviceInterest}</span>
-                        </p>
-                      </div>
-                      
-                    </td>
-                  </tr>
-                  
-                  <!-- Elegant Footer -->
-                  <tr>
-                    <td style="background: linear-gradient(135deg, #fafafa 0%, #f8f8f8 100%); padding: 30px 40px; text-align: center; border-top: 1px solid #f0f0f0;">
-                      <p style="margin: 0 0 10px 0; color: #a8a8a8; font-size: 13px; line-height: 1.6; font-family: 'Georgia', serif;">
-                        ⏰ ${new Date(contact.timestamp).toLocaleString('en-IN', { 
-                          weekday: 'long', 
-                          year: 'numeric', 
-                          month: 'long', 
-                          day: 'numeric',
-                          hour: '2-digit',
-                          minute: '2-digit',
-                          hour12: true 
-                        })}
-                      </p>
-                      <p style="margin: 0; color: #c0c0c0; font-size: 11px; letter-spacing: 0.5px;">
-                        Automated notification • Goodness Glamour Salon<br>
-                        All inquiries saved to Excel file
-                      </p>
-                      <!-- Subtle floral footer accent -->
-                      <p style="margin: 15px 0 0 0; opacity: 0.2; font-size: 20px;">🌸 🌿 🌸</p>
-                    </td>
-                  </tr>
-                  
-                </table>
-                
-              </td>
-            </tr>
-          </table>
-          
-        </body>
-        </html>
-      `,
-    };
-
-    await transporter.sendMail(mailOptions);
-    console.log('✅ Email sent successfully to 2akonsultant@gmail.com');
-    return true;
-  } catch (error) {
-    console.error('❌ Error sending email:', error);
-    return false;
-  }
-}
-
-// Update Excel file with new contact message
-export async function updateExcelFile(contact: ContactMessage): Promise<boolean> {
-  try {
-    const dataDir = path.join(process.cwd(), 'data');
-    const excelPath = path.join(dataDir, 'contact-messages.xlsx');
-
-    // Ensure data directory exists
-    if (!fs.existsSync(dataDir)) {
-      fs.mkdirSync(dataDir, { recursive: true });
-    }
-
-    let workbook: XLSX.WorkBook;
-    let worksheet: XLSX.WorkSheet;
-    let existingData: any[] = [];
-
-    // Check if file exists and read existing data
-    if (fs.existsSync(excelPath)) {
-      workbook = XLSX.readFile(excelPath);
-      worksheet = workbook.Sheets['Contact Messages'];
-      if (worksheet) {
-        existingData = XLSX.utils.sheet_to_json(worksheet);
-      }
-    } else {
-      workbook = XLSX.utils.book_new();
-    }
-
-    // Add new contact to data
-    const newRow = {
-      'Submission Date': new Date(contact.timestamp).toLocaleString('en-IN', {
-        day: '2-digit',
-        month: '2-digit',
-        year: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit',
-        hour12: true
-      }),
-      'Name': contact.name,
-      'Phone Number': contact.phone,
-      'Service Interest': contact.serviceInterest,
-      'Address': contact.address,
-      'Message': contact.message,
-    };
-
-    existingData.push(newRow);
-
-    // Create new worksheet with all data
-    const newWorksheet = XLSX.utils.json_to_sheet(existingData);
-
-    // Set column widths for better readability
-    newWorksheet['!cols'] = [
-      { wch: 20 }, // Submission Date
-      { wch: 25 }, // Name
-      { wch: 15 }, // Phone
-      { wch: 25 }, // Service Interest
-      { wch: 35 }, // Address
-      { wch: 50 }, // Message
-    ];
-
-    // Add or update the worksheet
-    if (workbook.Sheets['Contact Messages']) {
-      workbook.Sheets['Contact Messages'] = newWorksheet;
-    } else {
-      XLSX.utils.book_append_sheet(workbook, newWorksheet, 'Contact Messages');
-    }
-
-    // Write to file
-    XLSX.writeFile(workbook, excelPath);
-    
-    console.log(`✅ Excel file updated: ${excelPath}`);
-    console.log(`📊 Total contact messages: ${existingData.length}`);
-    
-    return true;
-  } catch (error) {
-    console.error('❌ Error updating Excel file:', error);
-    return false;
-  }
-}
-
-// Process contact form submission
-export async function processContactMessage(contact: ContactMessage): Promise<{ 
-  success: boolean; 
-  emailSent: boolean; 
-  excelUpdated: boolean; 
-}> {
-  console.log('📧 Processing contact message from:', contact.name);
+Women's Hair Services:
+- Haircut & Styling: ₹500 - ₹1,500
+  * Basic haircut and blow dry
+  * Professional styling for any occasion
+  * Includes hair wash and conditioning
   
-  const emailSent = await sendContactEmail(contact);
-  const excelUpdated = await updateExcelFile(contact);
+- Hair Coloring: ₹2,000 - ₹5,000
+  * Full head coloring
+  * Highlights and lowlights
+  * Balayage and ombre techniques
+  * Fashion colors available
   
-  return {
-    success: emailSent || excelUpdated, // Success if at least one succeeds
-    emailSent,
-    excelUpdated,
-  };
-}
+- Hair Spa Treatment: ₹1,500 - ₹3,000
+  * Deep conditioning treatment
+  * Scalp massage and therapy
+  * Hair strengthening and nourishment
+  * Reduces hair fall and damage
+  
+- Keratin Treatment: ₹4,000 - ₹8,000
+  * Smoothens and straightens hair
+  * Reduces frizz for 3-6 months
+  * Makes hair more manageable
+  * Adds shine and softness
+  
+- Hair Straightening: ₹3,000 - ₹6,000
+  * Permanent straightening
+  * Lasts 6-8 months
+  * Suitable for all hair types
+  
+- Highlights: ₹2,500 - ₹5,000
+  * Partial or full highlights
+  * Natural or bold colors
+  * Professional color blending
 
-// Helper to log email errors with actionable hints
-const logEmailError = (context: string, error: unknown) => {
-  const err = error instanceof Error ? error : new Error(String(error));
-  const msg = err.message || '';
-  console.error(`❌ ${context}:`, msg);
-  if (msg.includes('Invalid login') || msg.includes('EAUTH') || msg.includes('authentication')) {
-    console.error('   → Gmail auth failed. Use App Password (not regular password): https://myaccount.google.com/apppasswords');
-    console.error('   → Set EMAIL_PASSWORD=your-app-password in .env');
-  }
-};
+Kids Hair Services:
+- Kids Haircut (Boys): ₹300 - ₹500
+  * Age-appropriate styles
+  * Fun and comfortable experience
+  * Quick and easy cuts
+  
+- Kids Haircut (Girls): ₹400 - ₹700
+  * Trendy styles for girls
+  * Layered cuts and bangs
+  * Comfortable and gentle service
+  
+- Party Hairstyle: ₹800 - ₹1,500
+  * Special occasion styling
+  * Birthday party looks
+  * Fancy braids and updos
+  * Hair accessories included
+  
+- Creative Braiding: ₹500 - ₹1,200
+  * French braids, fishtail braids
+  * Multiple braid styles
+  * Perfect for school or parties
+  
+- Hair Coloring (Temporary): ₹500 - ₹1,000
+  * Washable colors for kids
+  * Safe and non-toxic
+  * Fun colors for parties
 
-// Send booking confirmation email
-export async function sendBookingEmail(booking: BookingData): Promise<boolean> {
-  try {
-    if (!getEmailPassword()?.trim()) {
-      console.error('❌ Skipping admin booking email: EMAIL_PASSWORD not configured');
-      return false;
-    }
-    const transporter = createTransporter();
+Bridal & Party Services:
+- Bridal Hair & Makeup: ₹15,000 - ₹30,000
+  * Complete bridal package
+  * Pre-bridal consultation
+  * Hair styling and makeup
+  * Includes trial session
+  * Lasts all day
+  
+- Party Makeup: ₹3,000 - ₹8,000
+  * Professional makeup for events
+  * Evening party looks
+  * HD makeup available
+  * Includes hairstyling
+  
+- Pre-Bridal Packages: ₹10,000 - ₹25,000
+  * Multiple sessions before wedding
+  * Skin care treatments
+  * Hair spa and treatments
+  * Customized beauty plan
+  
+- Engagement Look: ₹5,000 - ₹12,000
+  * Hair and makeup for engagement
+  * Traditional or modern looks
+  * Includes trial session
 
-    const mailOptions = {
-      from: process.env.EMAIL_USER || '2akonsultant@gmail.com',
-      to: '2akonsultant@gmail.com',
-      subject: `💐 New Booking Confirmation | ${booking.customerName} | Goodness Glamour Salon`,
-      html: `
-        <!DOCTYPE html>
-        <html>
-        <head>
-          <meta charset="UTF-8">
-          <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        </head>
-        <body style="margin: 0; padding: 0; background: linear-gradient(135deg, #fef5f1 0%, #fef9f5 50%, #f5f3f9 100%); font-family: 'Georgia', 'Times New Roman', serif;">
-          
-          <!-- Main Container -->
-          <table width="100%" cellpadding="0" cellspacing="0" style="background: linear-gradient(135deg, #fef5f1 0%, #fef9f5 50%, #f5f3f9 100%); padding: 40px 20px;">
-            <tr>
-              <td align="center">
-                
-                <!-- Email Content -->
-                <table width="620" cellpadding="0" cellspacing="0" style="background-color: #ffffff; border-radius: 24px; overflow: hidden; box-shadow: 0 8px 32px rgba(0,0,0,0.08);">
-                  
-                  <!-- Elegant Header -->
-                  <tr>
-                    <td style="background: linear-gradient(135deg, #ffeef5 0%, #fff0f3 50%, #f9f0ff 100%); padding: 50px 40px 40px 40px; text-align: center; position: relative;">
-                      <!-- Subtle floral corner accent -->
-                      <div style="position: absolute; top: 15px; right: 15px; opacity: 0.15; font-size: 40px;">🌸</div>
-                      <div style="position: absolute; bottom: 15px; left: 15px; opacity: 0.15; font-size: 40px;">🌿</div>
-                      
-                      <h1 style="margin: 0; color: #d4a5a5; font-size: 36px; font-weight: 300; letter-spacing: 3px; font-family: 'Georgia', serif;">
-                        Goodness Glamour
-                      </h1>
-                      <p style="margin: 8px 0 0 0; color: #b8a0a0; font-size: 15px; font-weight: 400; letter-spacing: 2px; font-family: 'Georgia', serif;">
-                        Ladies & Kids Salon
-                      </p>
-                      <div style="margin-top: 25px; padding: 10px 30px; background-color: rgba(255,255,255,0.7); border-radius: 20px; display: inline-block; border: 1px solid rgba(212,165,165,0.2);">
-                        <p style="margin: 0; color: #c9a0a0; font-size: 13px; font-weight: 500; letter-spacing: 1px;">
-                          💐 New Booking Confirmation
-                        </p>
-                      </div>
-                    </td>
-                  </tr>
-                  
-                  <!-- Content Section -->
-                  <tr>
-                    <td style="padding: 40px;">
-                      
-                      <!-- Customer Name Card -->
-                      <div style="background: linear-gradient(135deg, #fff5f0 0%, #fff8f5 100%); padding: 25px 30px; border-radius: 18px; margin-bottom: 30px; border: 1px solid #ffe8e0; box-shadow: 0 4px 16px rgba(255,200,180,0.1);">
-                        <table width="100%" cellpadding="0" cellspacing="0">
-                          <tr>
-                            <td width="60" valign="middle">
-                              <div style="width: 55px; height: 55px; background: linear-gradient(135deg, #ffd4c8 0%, #ffc4b8 100%); border-radius: 50%; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 12px rgba(255,180,160,0.25);">
-                                <span style="font-size: 26px;">✨</span>
-                              </div>
-                            </td>
-                            <td style="padding-left: 20px;">
-                              <h2 style="margin: 0; color: #c88080; font-size: 26px; font-weight: 400; font-family: 'Georgia', serif;">${booking.customerName}</h2>
-                              <p style="margin: 5px 0 0 0; color: #d4a5a5; font-size: 14px; font-weight: 400; letter-spacing: 0.5px;">New Booking Confirmed</p>
-                            </td>
-                          </tr>
-                        </table>
-                      </div>
-                      
-                      <!-- Booking Details -->
-                      <div style="background: linear-gradient(135deg, #f8f5ff 0%, #faf7ff 100%); padding: 30px; border-radius: 18px; margin-bottom: 30px; border: 1px solid #f0e8ff; box-shadow: 0 4px 16px rgba(200,180,220,0.08);">
-                        <h3 style="margin: 0 0 25px 0; color: #a88cb8; font-size: 16px; font-weight: 500; letter-spacing: 1px; font-family: 'Georgia', serif; border-bottom: 1px solid rgba(200,180,220,0.2); padding-bottom: 12px;">
-                          Booking Details
-                        </h3>
-                        
-                        <!-- Booking ID -->
-                        <div style="background-color: #ffffff; padding: 18px 20px; border-radius: 14px; margin-bottom: 15px; border-left: 3px solid #d4b5d4; box-shadow: 0 2px 8px rgba(0,0,0,0.03);">
-                          <table width="100%" cellpadding="0" cellspacing="0">
-                            <tr>
-                              <td width="35" valign="middle">
-                                <span style="font-size: 20px; opacity: 0.7;">🆔</span>
-                              </td>
-                              <td>
-                                <p style="margin: 0 0 4px 0; color: #b8a0b8; font-size: 11px; font-weight: 500; text-transform: uppercase; letter-spacing: 1px;">Booking ID</p>
-                                <p style="margin: 0; color: #9880a8; font-size: 16px; font-weight: 500; font-family: 'Georgia', serif;">${booking.id}</p>
-                              </td>
-                            </tr>
-                          </table>
-                        </div>
-                        
-                        <!-- Date & Time -->
-                        <div style="background-color: #ffffff; padding: 18px 20px; border-radius: 14px; margin-bottom: 15px; border-left: 3px solid #d4b5d4; box-shadow: 0 2px 8px rgba(0,0,0,0.03);">
-                          <table width="100%" cellpadding="0" cellspacing="0">
-                            <tr>
-                              <td width="35" valign="middle">
-                                <span style="font-size: 20px; opacity: 0.7;">📅</span>
-                              </td>
-                              <td>
-                                <p style="margin: 0 0 4px 0; color: #b8a0b8; font-size: 11px; font-weight: 500; text-transform: uppercase; letter-spacing: 1px;">Appointment Date & Time</p>
-                                <p style="margin: 0; color: #9880a8; font-size: 16px; font-weight: 500; font-family: 'Georgia', serif;">${new Date(booking.appointmentDate).toLocaleDateString('en-IN', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })} at ${booking.appointmentTime}</p>
-                              </td>
-                            </tr>
-                          </table>
-                        </div>
-                        
-                        <!-- Services -->
-                        <div style="background-color: #ffffff; padding: 18px 20px; border-radius: 14px; margin-bottom: 15px; border-left: 3px solid #d4b5d4; box-shadow: 0 2px 8px rgba(0,0,0,0.03);">
-                          <table width="100%" cellpadding="0" cellspacing="0">
-                            <tr>
-                              <td width="35" valign="top">
-                                <span style="font-size: 20px; opacity: 0.7;">💇‍♀️</span>
-                              </td>
-                              <td>
-                                <p style="margin: 0 0 4px 0; color: #b8a0b8; font-size: 11px; font-weight: 500; text-transform: uppercase; letter-spacing: 1px;">Services Booked</p>
-                                <div style="margin: 0;">
-                                  ${booking.services.map(service => `<div style="margin: 2px 0; color: #9880a8; font-size: 15px; font-weight: 500; font-family: 'Georgia', serif;">• ${service}</div>`).join('')}
-                                </div>
-                              </td>
-                            </tr>
-                          </table>
-                        </div>
-                        
-                        <!-- Total Amount -->
-                        <div style="background-color: #ffffff; padding: 18px 20px; border-radius: 14px; margin-bottom: 15px; border-left: 3px solid #d4b5d4; box-shadow: 0 2px 8px rgba(0,0,0,0.03);">
-                          <table width="100%" cellpadding="0" cellspacing="0">
-                            <tr>
-                              <td width="35" valign="middle">
-                                <span style="font-size: 20px; opacity: 0.7;">💰</span>
-                              </td>
-                              <td>
-                                <p style="margin: 0 0 4px 0; color: #b8a0b8; font-size: 11px; font-weight: 500; text-transform: uppercase; letter-spacing: 1px;">Total Amount</p>
-                                <p style="margin: 0; color: #9880a8; font-size: 18px; font-weight: 600; font-family: 'Georgia', serif;">₹${booking.totalAmount}</p>
-                              </td>
-                            </tr>
-                          </table>
-                        </div>
-                        
-                        <!-- Address -->
-                        <div style="background-color: #ffffff; padding: 18px 20px; border-radius: 14px; border-left: 3px solid #d4b5d4; box-shadow: 0 2px 8px rgba(0,0,0,0.03);">
-                          <table width="100%" cellpadding="0" cellspacing="0">
-                            <tr>
-                              <td width="35" valign="top">
-                                <span style="font-size: 20px; opacity: 0.7;">📍</span>
-                              </td>
-                              <td>
-                                <p style="margin: 0 0 4px 0; color: #b8a0b8; font-size: 11px; font-weight: 500; text-transform: uppercase; letter-spacing: 1px;">Service Address</p>
-                                <p style="margin: 0; color: #9880a8; font-size: 15px; font-weight: 400; line-height: 1.6; font-family: 'Georgia', serif;">${booking.customerAddress}</p>
-                              </td>
-                            </tr>
-                          </table>
-                        </div>
-                      </div>
-                      
-                      <!-- Contact Information -->
-                      <div style="background: linear-gradient(135deg, #f0f9f8 0%, #f5faf9 100%); padding: 30px; border-radius: 18px; margin-bottom: 30px; border: 1px solid #e0f0ed; box-shadow: 0 4px 16px rgba(180,220,210,0.08);">
-                        <h3 style="margin: 0 0 18px 0; color: #88b8a8; font-size: 16px; font-weight: 500; letter-spacing: 1px; font-family: 'Georgia', serif;">
-                          Customer Contact Information
-                        </h3>
-                        <div style="background-color: #ffffff; padding: 22px 25px; border-radius: 14px; border-left: 3px solid #a8d4c4; box-shadow: 0 2px 8px rgba(0,0,0,0.03);">
-                          <div style="margin-bottom: 15px;">
-                            <p style="margin: 0 0 4px 0; color: #88b8a8; font-size: 11px; font-weight: 500; text-transform: uppercase; letter-spacing: 1px;">Phone Number</p>
-                            <a href="tel:${booking.customerPhone}" style="margin: 0; color: #c88080; font-size: 18px; font-weight: 500; text-decoration: none; display: block; font-family: 'Georgia', serif;">${booking.customerPhone}</a>
-                          </div>
-                          ${booking.customerEmail ? `
-                          <div>
-                            <p style="margin: 0 0 4px 0; color: #88b8a8; font-size: 11px; font-weight: 500; text-transform: uppercase; letter-spacing: 1px;">Email Address</p>
-                            <a href="mailto:${booking.customerEmail}" style="margin: 0; color: #c88080; font-size: 16px; font-weight: 500; text-decoration: none; display: block; font-family: 'Georgia', serif;">${booking.customerEmail}</a>
-                          </div>
-                          ` : ''}
-                        </div>
-                      </div>
-                      
-                      ${booking.notes ? `
-                      <!-- Notes Section -->
-                      <div style="background: linear-gradient(135deg, #fff8f0 0%, #fffbf5 100%); padding: 30px; border-radius: 18px; margin-bottom: 30px; border: 1px solid #ffe8d0; box-shadow: 0 4px 16px rgba(255,200,160,0.08);">
-                        <h3 style="margin: 0 0 18px 0; color: #d4a080; font-size: 16px; font-weight: 500; letter-spacing: 1px; font-family: 'Georgia', serif;">
-                          Special Instructions
-                        </h3>
-                        <div style="background-color: #ffffff; padding: 22px 25px; border-radius: 14px; border-left: 3px solid #d4a080; box-shadow: 0 2px 8px rgba(0,0,0,0.03);">
-                          <p style="margin: 0; color: #687878; font-size: 15px; line-height: 1.8; white-space: pre-wrap; font-family: 'Georgia', serif;">${booking.notes}</p>
-                        </div>
-                      </div>
-                      ` : ''}
-                      
-                      <!-- Action Button -->
-                      <div style="background: linear-gradient(135deg, #f5fff8 0%, #f8fff9 100%); padding: 35px 30px; border-radius: 18px; text-align: center; border: 1px solid #e8f5ed; box-shadow: 0 4px 16px rgba(180,220,200,0.1);">
-                        <p style="margin: 0 0 18px 0; color: #88b8a0; font-size: 14px; font-weight: 500; letter-spacing: 0.5px;">
-                          Please Contact Customer to Confirm
-                        </p>
-                        <a href="tel:${booking.customerPhone}" style="display: inline-block; background: linear-gradient(135deg, #b8d4c8 0%, #a8c8b8 100%); color: #ffffff; padding: 16px 45px; border-radius: 25px; text-decoration: none; font-size: 17px; font-weight: 500; box-shadow: 0 6px 20px rgba(168,200,184,0.3); font-family: 'Georgia', serif; letter-spacing: 0.5px;">
-                          📞 Call ${booking.customerName}
-                        </a>
-                        <p style="margin: 18px 0 0 0; color: #98b8a8; font-size: 13px; font-weight: 400;">
-                          Booking: <span style="color: #88a898; font-weight: 500;">${booking.services.join(', ')}</span>
-                        </p>
-                      </div>
-                      
-                    </td>
-                  </tr>
-                  
-                  <!-- Elegant Footer -->
-                  <tr>
-                    <td style="background: linear-gradient(135deg, #fafafa 0%, #f8f8f8 100%); padding: 30px 40px; text-align: center; border-top: 1px solid #f0f0f0;">
-                      <p style="margin: 0 0 10px 0; color: #a8a8a8; font-size: 13px; line-height: 1.6; font-family: 'Georgia', serif;">
-                        ⏰ ${new Date(booking.timestamp).toLocaleString('en-IN', { 
-                          weekday: 'long', 
-                          year: 'numeric', 
-                          month: 'long', 
-                          day: 'numeric',
-                          hour: '2-digit',
-                          minute: '2-digit',
-                          hour12: true 
-                        })}
-                      </p>
-                      <p style="margin: 0; color: #c0c0c0; font-size: 11px; letter-spacing: 0.5px;">
-                        Automated booking confirmation • Goodness Glamour Salon<br>
-                        All bookings saved to Excel file
-                      </p>
-                      <!-- Subtle floral footer accent -->
-                      <p style="margin: 15px 0 0 0; opacity: 0.2; font-size: 20px;">🌸 🌿 🌸</p>
-                    </td>
-                  </tr>
-                  
-                </table>
-                
-              </td>
-            </tr>
-          </table>
-          
-        </body>
-        </html>
-      `,
-    };
+Additional Services:
+- Hair Wash & Blow Dry: ₹500 - ₹800
+- Deep Conditioning: ₹800 - ₹1,500
+- Scalp Treatment: ₹1,000 - ₹2,000
+- Hair Extensions: ₹3,000 - ₹10,000
 
-    await transporter.sendMail(mailOptions);
-    console.log('✅ Booking confirmation email sent successfully to 2akonsultant@gmail.com');
-    return true;
-  } catch (error) {
-    logEmailError('Error sending admin booking email', error);
-    return false;
-  }
-}
+BOOKING PROCESS:
+1. Customer scans QR code or visits website
+2. Chats with AI assistant (you) for recommendations
+3. Books appointment online with date/time selection
+4. Receives confirmation email with booking details
+5. Our professional stylist arrives at customer's doorstep with all equipment
 
-// Send booking confirmation email to customer
-export async function sendCustomerBookingConfirmation(booking: BookingData): Promise<boolean> {
-  try {
-    if (!getEmailPassword()?.trim()) {
-      console.error('❌ Skipping customer confirmation email: EMAIL_PASSWORD not configured');
-      return false;
-    }
-    console.log(`📧 Sending customer confirmation to: ${booking.customerEmail}`);
-    console.log(`📧 From: ${process.env.EMAIL_USER || '2akonsultant@gmail.com'}`);
-    
-    // Check if customer email is provided
-    console.log(`📧 Validating customer email: "${booking.customerEmail}"`);
-    if (!booking.customerEmail || booking.customerEmail.trim() === '') {
-      console.log('❌ No customer email provided, skipping customer confirmation');
-      return false;
-    }
-    
-    // Basic email validation
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(booking.customerEmail)) {
-      console.log(`❌ Invalid email format: "${booking.customerEmail}", skipping customer confirmation`);
-      return false;
-    }
-    
-    console.log(`✅ Customer email validation passed: "${booking.customerEmail}"`);
-    
-    const transporter = createTransporter();
+KEY FEATURES:
+- Doorstep service (we come to your home - no need to visit salon)
+- Professional stylists with 5+ years of experience
+- Premium quality products used (L'Oréal, Schwarzkopf, etc.)
+- Flexible timing (9 AM - 8 PM, all days)
+- Family packages available (discounts for multiple bookings)
+- Customized beauty solutions based on hair type and needs
+- Safe and hygienic practices
+- Equipment and products brought to your location
 
-    const mailOptions = {
-      from: process.env.EMAIL_USER || '2akonsultant@gmail.com',
-      to: booking.customerEmail,
-      subject: `💐 Booking Confirmed | Your Appointment at Goodness Glamour Salon`,
-      html: `
-        <!DOCTYPE html>
-        <html>
-        <head>
-          <meta charset="UTF-8">
-          <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        </head>
-        <body style="margin: 0; padding: 0; background: linear-gradient(135deg, #fef5f1 0%, #fef9f5 50%, #f5f3f9 100%); font-family: 'Georgia', 'Times New Roman', serif;">
-          
-          <!-- Main Container -->
-          <table width="100%" cellpadding="0" cellspacing="0" style="background: linear-gradient(135deg, #fef5f1 0%, #fef9f5 50%, #f5f3f9 100%); padding: 40px 20px;">
-            <tr>
-              <td align="center">
-                
-                <!-- Email Content -->
-                <table width="620" cellpadding="0" cellspacing="0" style="background-color: #ffffff; border-radius: 24px; overflow: hidden; box-shadow: 0 8px 32px rgba(0,0,0,0.08);">
-                  
-                  <!-- Elegant Header -->
-                  <tr>
-                    <td style="background: linear-gradient(135deg, #ffeef5 0%, #fff0f3 50%, #f9f0ff 100%); padding: 50px 40px 40px 40px; text-align: center; position: relative;">
-                      <!-- Subtle floral corner accent -->
-                      <div style="position: absolute; top: 15px; right: 15px; opacity: 0.15; font-size: 40px;">🌸</div>
-                      <div style="position: absolute; bottom: 15px; left: 15px; opacity: 0.15; font-size: 40px;">🌿</div>
-                      
-                      <h1 style="margin: 0; color: #d4a5a5; font-size: 36px; font-weight: 300; letter-spacing: 3px; font-family: 'Georgia', serif;">
-                        Goodness Glamour
-                      </h1>
-                      <p style="margin: 8px 0 0 0; color: #b8a0a0; font-size: 15px; font-weight: 400; letter-spacing: 2px; font-family: 'Georgia', serif;">
-                        Ladies & Kids Salon
-                      </p>
-                      <div style="margin-top: 25px; padding: 10px 30px; background-color: rgba(255,255,255,0.7); border-radius: 20px; display: inline-block; border: 1px solid rgba(212,165,165,0.2);">
-                        <p style="margin: 0; color: #c9a0a0; font-size: 13px; font-weight: 500; letter-spacing: 1px;">
-                          💐 Booking Confirmed
-                        </p>
-                      </div>
-                    </td>
-                  </tr>
-                  
-                  <!-- Content Section -->
-                  <tr>
-                    <td style="padding: 40px;">
-                      
-                      <!-- Welcome Message -->
-                      <div style="background: linear-gradient(135deg, #fff5f0 0%, #fff8f5 100%); padding: 25px 30px; border-radius: 18px; margin-bottom: 30px; border: 1px solid #ffe8e0; box-shadow: 0 4px 16px rgba(255,200,180,0.1); text-align: center;">
-                        <h2 style="margin: 0 0 10px 0; color: #c88080; font-size: 24px; font-weight: 400; font-family: 'Georgia', serif;">Dear ${booking.customerName},</h2>
-                        <p style="margin: 0; color: #d4a5a5; font-size: 16px; font-weight: 400; line-height: 1.6;">
-                          Your appointment has been successfully confirmed! We're excited to pamper you with our premium beauty services.
-                        </p>
-                      </div>
-                      
-                      <!-- Booking Details -->
-                      <div style="background: linear-gradient(135deg, #f8f5ff 0%, #faf7ff 100%); padding: 30px; border-radius: 18px; margin-bottom: 30px; border: 1px solid #f0e8ff; box-shadow: 0 4px 16px rgba(200,180,220,0.08);">
-                        <h3 style="margin: 0 0 25px 0; color: #a88cb8; font-size: 16px; font-weight: 500; letter-spacing: 1px; font-family: 'Georgia', serif; border-bottom: 1px solid rgba(200,180,220,0.2); padding-bottom: 12px;">
-                          Your Appointment Details
-                        </h3>
-                        
-                        <!-- Date & Time -->
-                        <div style="background-color: #ffffff; padding: 18px 20px; border-radius: 14px; margin-bottom: 15px; border-left: 3px solid #d4b5d4; box-shadow: 0 2px 8px rgba(0,0,0,0.03);">
-                          <table width="100%" cellpadding="0" cellspacing="0">
-                            <tr>
-                              <td width="35" valign="middle">
-                                <span style="font-size: 20px; opacity: 0.7;">📅</span>
-                              </td>
-                              <td>
-                                <p style="margin: 0 0 4px 0; color: #b8a0b8; font-size: 11px; font-weight: 500; text-transform: uppercase; letter-spacing: 1px;">Date & Time</p>
-                                <p style="margin: 0; color: #9880a8; font-size: 16px; font-weight: 500; font-family: 'Georgia', serif;">${new Date(booking.appointmentDate).toLocaleDateString('en-IN', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })} at ${booking.appointmentTime}</p>
-                              </td>
-                            </tr>
-                          </table>
-                        </div>
-                        
-                        <!-- Services -->
-                        <div style="background-color: #ffffff; padding: 18px 20px; border-radius: 14px; margin-bottom: 15px; border-left: 3px solid #d4b5d4; box-shadow: 0 2px 8px rgba(0,0,0,0.03);">
-                          <table width="100%" cellpadding="0" cellspacing="0">
-                            <tr>
-                              <td width="35" valign="middle">
-                                <span style="font-size: 20px; opacity: 0.7;">✨</span>
-                              </td>
-                              <td>
-                                <p style="margin: 0 0 4px 0; color: #b8a0b8; font-size: 11px; font-weight: 500; text-transform: uppercase; letter-spacing: 1px;">Services</p>
-                                <p style="margin: 0; color: #9880a8; font-size: 16px; font-weight: 500; font-family: 'Georgia', serif;">${booking.services}</p>
-                              </td>
-                            </tr>
-                          </table>
-                        </div>
-                        
-                        <!-- Location -->
-                        <div style="background-color: #ffffff; padding: 18px 20px; border-radius: 14px; margin-bottom: 15px; border-left: 3px solid #d4b5d4; box-shadow: 0 2px 8px rgba(0,0,0,0.03);">
-                          <table width="100%" cellpadding="0" cellspacing="0">
-                            <tr>
-                              <td width="35" valign="middle">
-                                <span style="font-size: 20px; opacity: 0.7;">📍</span>
-                              </td>
-                              <td>
-                                <p style="margin: 0 0 4px 0; color: #b8a0b8; font-size: 11px; font-weight: 500; text-transform: uppercase; letter-spacing: 1px;">Location</p>
-                                <p style="margin: 0; color: #9880a8; font-size: 16px; font-weight: 500; font-family: 'Georgia', serif;">${booking.notes || 'No location specified'}</p>
-                              </td>
-                            </tr>
-                          </table>
-                        </div>
-                        
-                        <!-- Total Amount -->
-                        <div style="background-color: #ffffff; padding: 18px 20px; border-radius: 14px; border-left: 3px solid #d4b5d4; box-shadow: 0 2px 8px rgba(0,0,0,0.03);">
-                          <table width="100%" cellpadding="0" cellspacing="0">
-                            <tr>
-                              <td width="35" valign="middle">
-                                <span style="font-size: 20px; opacity: 0.7;">💰</span>
-                              </td>
-                              <td>
-                                <p style="margin: 0 0 4px 0; color: #b8a0b8; font-size: 11px; font-weight: 500; text-transform: uppercase; letter-spacing: 1px;">Total Amount</p>
-                                <p style="margin: 0; color: #9880a8; font-size: 16px; font-weight: 500; font-family: 'Georgia', serif;">₹${booking.totalAmount}</p>
-                              </td>
-                            </tr>
-                          </table>
-                        </div>
-                      </div>
-                      
-                      <!-- Important Notes -->
-                      <div style="background: linear-gradient(135deg, #fff0f5 0%, #fff5f0 100%); padding: 25px 30px; border-radius: 18px; margin-bottom: 30px; border: 1px solid #ffe0e8; box-shadow: 0 4px 16px rgba(255,180,200,0.08);">
-                        <h3 style="margin: 0 0 15px 0; color: #c880a0; font-size: 16px; font-weight: 500; letter-spacing: 1px; font-family: 'Georgia', serif;">
-                          📝 Important Reminders
-                        </h3>
-                        <ul style="margin: 0; padding-left: 20px; color: #b880a0; font-size: 14px; line-height: 1.8;">
-                          <li>Please arrive 10 minutes before your scheduled time</li>
-                          <li>Bring a valid ID for verification</li>
-                          <li>For any changes, please contact us at least 2 hours in advance</li>
-                          <li>We offer doorstep service - our team will arrive at your specified location</li>
-                        </ul>
-                      </div>
-                      
-                      <!-- Contact Information -->
-                      <div style="background: linear-gradient(135deg, #f0f8ff 0%, #f5faff 100%); padding: 25px 30px; border-radius: 18px; border: 1px solid #e0e8ff; box-shadow: 0 4px 16px rgba(180,200,255,0.08);">
-                        <h3 style="margin: 0 0 20px 0; color: #8080c0; font-size: 16px; font-weight: 500; letter-spacing: 1px; font-family: 'Georgia', serif; text-align: center;">
-                          📞 Need Help?
-                        </h3>
-                        <div style="text-align: center;">
-                          <p style="margin: 0 0 8px 0; color: #a0a0d0; font-size: 14px; font-weight: 400;">Call us: <strong style="color: #8080c0;">+91 9876543210</strong></p>
-                          <p style="margin: 0; color: #a0a0d0; font-size: 14px; font-weight: 400;">Email: <strong style="color: #8080c0;">2akonsultant@gmail.com</strong></p>
-                        </div>
-                      </div>
-                      
-                    </td>
-                  </tr>
-                  
-                  <!-- Footer -->
-                  <tr>
-                    <td style="background: linear-gradient(135deg, #f8f5f0 0%, #faf7f5 100%); padding: 30px 40px; text-align: center; border-top: 1px solid rgba(212,165,165,0.1);">
-                      <p style="margin: 0; color: #d4a5a5; font-size: 14px; font-weight: 400; line-height: 1.6; font-family: 'Georgia', serif;">
-                        Thank you for choosing <strong style="color: #c88080;">Goodness Glamour Salon</strong>!<br>
-                        We look forward to making you feel beautiful and confident.
-                      </p>
-                      <p style="margin: 20px 0 0 0; color: #c0c0c0; font-size: 11px; letter-spacing: 0.5px;">
-                        Automated confirmation • Goodness Glamour Salon<br>
-                        Your booking details have been saved
-                      </p>
-                      <!-- Subtle floral footer accent -->
-                      <p style="margin: 15px 0 0 0; opacity: 0.2; font-size: 20px;">🌸 🌿 🌸</p>
-                    </td>
-                  </tr>
-                  
-                </table>
-                
-              </td>
-            </tr>
-          </table>
-          
-        </body>
-        </html>
-      `,
-    };
+COMMON QUESTIONS & ANSWERS:
 
-    const result = await transporter.sendMail(mailOptions);
-    console.log(`✅ Customer booking confirmation sent successfully to ${booking.customerEmail}`);
-    console.log(`📧 Email result:`, result.messageId);
-    return true;
-  } catch (error) {
-    logEmailError('Error sending customer booking confirmation', error);
-    return false;
-  }
-}
+Q: Do you really come to our home?
+A: Yes! We provide 100% doorstep services. Our stylists come to your home with all equipment and products.
 
-// Update Excel file with booking data
-export async function updateBookingExcelFile(booking: BookingData): Promise<boolean> {
-  try {
-    const dataDir = path.join(process.cwd(), 'data');
-    
-    // Ensure data directory exists
-    if (!fs.existsSync(dataDir)) {
-      fs.mkdirSync(dataDir, { recursive: true });
-    }
-    
-    const filePath = path.join(dataDir, 'bookings.xlsx');
-    
-    let workbook;
-    let worksheet;
-    let bookings: any[] = [];
-    
-    // Check if file exists
-    if (fs.existsSync(filePath)) {
-      workbook = XLSX.readFile(filePath);
-      worksheet = workbook.Sheets['Bookings'];
-      
-      if (worksheet) {
-        bookings = XLSX.utils.sheet_to_json(worksheet);
-      }
-    } else {
-      workbook = XLSX.utils.book_new();
-    }
-    
-    // Add new booking
-    const newBooking = {
-      'Booking ID': booking.id,
-      'Name': booking.customerName,
-      'Email': booking.customerEmail || '',
-      'Phone': booking.customerPhone,
-      'Date': new Date(booking.appointmentDate).toLocaleDateString('en-IN'),
-      'Time': booking.appointmentTime,
-      'Services': booking.services.join(', '),
-      'Location': booking.customerAddress,
-      'Total Amount': booking.totalAmount,
-      'Notes': booking.notes || '',
-      'Timestamp': new Date(booking.timestamp).toLocaleString('en-IN')
-    };
-    
-    bookings.push(newBooking);
-    
-    // Create new worksheet
-    worksheet = XLSX.utils.json_to_sheet(bookings);
-    workbook.Sheets['Bookings'] = worksheet;
-    
-    // Write file
-    XLSX.writeFile(workbook, filePath);
-    
-    console.log(`✅ Excel file updated: ${filePath}`);
-    console.log(`📊 Total bookings: ${bookings.length}`);
-    
-    return true;
-  } catch (error) {
-    console.error('❌ Error updating booking Excel file:', error);
-    return false;
-  }
-}
+Q: What areas do you cover?
+A: We provide services across the entire city. Just provide your address when booking.
 
-// Test email configuration
-export async function testEmailConfiguration(): Promise<boolean> {
-  try {
-    console.log('🧪 Testing email configuration...');
-    const transporter = createTransporter();
-    
-    const testMailOptions = {
-      from: process.env.EMAIL_USER || '2akonsultant@gmail.com',
-      to: process.env.EMAIL_USER || '2akonsultant@gmail.com',
-      subject: 'Test Email - Configuration Check',
-      html: '<p>This is a test email to verify email configuration is working.</p>'
-    };
-    
-    const result = await transporter.sendMail(testMailOptions);
-    console.log('✅ Test email sent successfully:', result.messageId);
-    return true;
-  } catch (error) {
-    console.error('❌ Test email failed:', error);
-    return false;
-  }
-}
+Q: How do I book an appointment?
+A: You can book through our website by clicking "Book Appointment" button, selecting your services, date, time, and location.
 
-// Process booking (save to Excel, send emails, and send SMS)
-export async function processBooking(booking: BookingData): Promise<{ 
-  emailSent: boolean; 
-  excelUpdated: boolean; 
-  customerEmailSent: boolean;
-  smsSent: boolean;
-  smsProvider?: string;
-}> {
-  try {
-    console.log(`📧 Processing booking from: ${booking.customerName}`);
+Q: Do you charge extra for doorstep service?
+A: No extra charges! The prices mentioned include doorstep service.
 
-    // Update Excel file (don't let Excel failures block emails)
-    let excelUpdated = false;
-    try {
-      excelUpdated = await updateBookingExcelFile(booking);
-    } catch (excelErr) {
-      console.error('❌ Excel update failed (emails will still be sent):', excelErr);
-    }
+Q: What if I need to reschedule?
+A: You can reschedule by contacting us at least 2 hours before your appointment time.
 
-    // Send email to admin
-    const adminEmailSent = await sendBookingEmail(booking);
-    
-    // Send confirmation email to customer
-    console.log(`📧 Attempting to send customer email to: ${booking.customerEmail}`);
-    const customerEmailSent = await sendCustomerBookingConfirmation(booking);
-    console.log(`📧 Customer email result: ${customerEmailSent}`);
-    
-    // Send SMS confirmation to customer
-    console.log(`📱 Attempting to send SMS to: ${booking.customerPhone}`);
-    const smsResult = await sendBookingConfirmationSMS({
-      id: booking.id,
-      customerName: booking.customerName,
-      customerPhone: booking.customerPhone,
-      appointmentDate: booking.appointmentDate,
-      appointmentTime: booking.appointmentTime,
-      services: booking.services,
-      totalAmount: booking.totalAmount,
-      customerAddress: booking.customerAddress
+Q: Are your products safe?
+A: Yes, we use only premium, branded products that are safe for all hair types.
+
+Q: Can I book for multiple family members?
+A: Yes! We offer family packages with special discounts for multiple bookings.
+
+Q: How long does each service take?
+A: Haircut: 30-45 mins, Coloring: 2-3 hours, Spa: 1-1.5 hours, Bridal: 3-4 hours
+
+YOUR ROLE:
+- Answer questions about services, prices, and timings
+- Recommend services based on customer needs
+- Explain the booking process clearly
+- Provide information about doorstep services
+- Be friendly, professional, and helpful
+- Encourage customers to book appointments through the website
+- If asked about specific availability, direct them to the booking page
+- For complaints or issues, provide contact number: 9036626642
+
+TONE & STYLE:
+- Be warm, friendly, and professional
+- Use simple language that's easy to understand
+- Show enthusiasm about services
+- Be patient and answer all questions thoroughly
+- Use emojis occasionally to be friendly (but not too many)
+- Always end with a call-to-action (book appointment, ask more questions, etc.)
+- Be conversational and natural - like chatting with a helpful salon receptionist
+- Keep responses concise (2-4 sentences) unless detailed info is requested
+- For any questions, be helpful and informative
+- For salon-specific questions, provide detailed service information
+- For general questions, provide accurate and helpful answers
+
+REAL-TIME CONVERSATION GUIDELINES:
+- You are a helpful AI assistant that can answer questions on ANY topic
+- You can discuss beauty, hair care, styling, and salon services when relevant
+- You can answer general knowledge questions, math problems, current events, etc.
+- You can help with homework, explain concepts, provide information on any subject
+- You are knowledgeable about science, history, technology, sports, entertainment, and more
+- When salon-related questions come up, provide detailed information about our services
+- Always maintain a helpful, friendly, and knowledgeable tone
+- Be conversational and engaging in your responses
+
+Remember: You are a knowledgeable AI assistant who can help with any topic. When salon-related questions come up, you have detailed information about Goodness Glamour Salon. Be helpful, friendly, and provide accurate information on whatever topic is discussed!
+`;
+
+// Initialize Gemini AI
+const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || "AIzaSyDEw4nW0xV_FQKf1SUX9fFJwnEY5n8_Jwc");
+
+// Create model with salon context
+const model = genAI.getGenerativeModel({
+  model: "gemini-2.0-flash-exp",
+  systemInstruction: SALON_CONTEXT,
+  generationConfig: {
+    maxOutputTokens: 2048,
+    temperature: 0.7,
+    topP: 0.8,
+    topK: 40,
+  },
+});
+
+// Store chat sessions by user/session ID
+const chatSessions = new Map<string, any>();
+
+/**
+ * Get or create a chat session for a user
+ */
+function getChatSession(sessionId: string = "default") {
+  if (!chatSessions.has(sessionId)) {
+    const chat = model.startChat({
+      history: [],
+      generationConfig: {
+        maxOutputTokens: 2048,
+        temperature: 0.7,
+        topP: 0.8,
+        topK: 40,
+      },
     });
-    console.log(`📱 SMS result: ${smsResult.success} via ${smsResult.provider}`);
+    chatSessions.set(sessionId, chat);
+    console.log(`🆕 New chat session created: ${sessionId}`);
+  }
+  return chatSessions.get(sessionId);
+}
+
+/**
+ * Send a message to Gemini and get a response
+ */
+export async function chatWithGemini(message: string, sessionId: string = "default"): Promise<string> {
+  try {
+    console.log(`🤖 Gemini AI - Received message: "${message}"`);
     
-    const emailSent = adminEmailSent; // Keep existing return format for compatibility
+    const chat = getChatSession(sessionId);
+    const result = await chat.sendMessage(message);
+    const response = result.response.text();
     
-    console.log(`✅ Booking processed: Admin Email=${adminEmailSent}, Customer Email=${customerEmailSent}, SMS=${smsResult.success} (${smsResult.provider}), Excel=${excelUpdated}`);
+    console.log(`✅ Gemini AI - Response generated (${response.length} chars)`);
+    return response;
+  } catch (error: any) {
+    console.error("❌ Gemini AI Error:", error.message);
     
-    return { 
-      emailSent, 
-      excelUpdated, 
-      customerEmailSent,
-      smsSent: smsResult.success,
-      smsProvider: smsResult.provider
-    };
-  } catch (error) {
-    console.error('❌ Error processing booking:', error);
-    return { 
-      emailSent: false, 
-      excelUpdated: false, 
-      customerEmailSent: false,
-      smsSent: false
-    };
+    // Enhanced fallback response with salon-specific information
+    if (error.message.includes("quota") || error.message.includes("limit")) {
+      return "I'm currently experiencing high demand. Please contact us directly at 9036626642 for immediate assistance, or email 2akonsultant@gmail.com. You can also book directly through our website - we're here to help with all your salon needs! 💇‍♀️";
+    }
+    
+    // Check if it's a salon-related question and provide relevant fallback
+    const lowerMessage = message.toLowerCase();
+    if (lowerMessage.includes("service") || lowerMessage.includes("price") || lowerMessage.includes("booking")) {
+      return "I can help you with our salon services! We offer:\n\n💇‍♀️ **Women's Services**: Haircuts (₹400-1,200), Coloring (₹1,200-3,500), Treatments (₹600-2,000)\n👶 **Kids Services**: Haircuts (₹150-500), Party Styling (₹200-600)\n👰 **Bridal Services**: Complete packages (₹15,000-30,000)\n\n📍 We provide doorstep service across the city!\n📞 Call 9036626642 to book now!\n⏰ Hours: 9 AM - 8 PM, all days";
+    }
+    
+    // General fallback
+    return "I apologize, but I'm having trouble connecting right now. Please contact us directly at 9036626642 or email 2akonsultant@gmail.com for immediate assistance. You can also try booking directly through our website! We're here to help with all your beauty needs! ✨";
   }
 }
 
 /**
- * Send OTP verification email
+ * Reset a chat session
  */
-export async function sendOTPEmail(
-  email: string,
-  name: string,
-  otp: string
-): Promise<boolean> {
+export function resetChatSession(sessionId: string = "default"): void {
+  chatSessions.delete(sessionId);
+  console.log(`🔄 Chat session reset: ${sessionId}`);
+}
+
+/**
+ * Get chat history for a session
+ */
+export function getChatHistory(sessionId: string = "default"): any[] {
+  const chat = chatSessions.get(sessionId);
+  return chat ? chat.history : [];
+}
+
+/**
+ * Test Gemini connection
+ */
+export async function testGeminiConnection(): Promise<boolean> {
   try {
-    console.log(`📧 Sending OTP to: ${email}`);
-    
-    const transporter = createTransporter();
-
-    const mailOptions = {
-      from: process.env.EMAIL_USER || '2akonsultant@gmail.com',
-      to: email,
-      subject: '🔐 Verify Your Email - Goodness Glamour Salon',
-      html: `
-        <!DOCTYPE html>
-        <html>
-        <head>
-          <meta charset="UTF-8">
-          <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        </head>
-        <body style="margin: 0; padding: 0; background: linear-gradient(135deg, #fef5f1 0%, #fef9f5 50%, #f5f3f9 100%); font-family: 'Georgia', 'Times New Roman', serif;">
-          
-          <table width="100%" cellpadding="0" cellspacing="0" style="background: linear-gradient(135deg, #fef5f1 0%, #fef9f5 50%, #f5f3f9 100%); padding: 40px 20px;">
-            <tr>
-              <td align="center">
-                
-                <table width="620" cellpadding="0" cellspacing="0" style="background-color: #ffffff; border-radius: 24px; overflow: hidden; box-shadow: 0 8px 32px rgba(0,0,0,0.08);">
-                  
-                  <tr>
-                    <td style="background: linear-gradient(135deg, #ffeef5 0%, #fff0f3 50%, #f9f0ff 100%); padding: 50px 40px 40px 40px; text-align: center; position: relative;">
-                      <h1 style="margin: 0; color: #d4a5a5; font-size: 36px; font-weight: 300; letter-spacing: 3px; font-family: 'Georgia', serif;">
-                        Goodness Glamour
-                      </h1>
-                      <p style="margin: 8px 0 0 0; color: #b8a0a0; font-size: 15px; font-weight: 400; letter-spacing: 2px; font-family: 'Georgia', serif;">
-                        Ladies & Kids Salon
-                      </p>
-                      <div style="margin-top: 25px; padding: 10px 30px; background-color: rgba(255,255,255,0.7); border-radius: 20px; display: inline-block; border: 1px solid rgba(212,165,165,0.2);">
-                        <p style="margin: 0; color: #c9a0a0; font-size: 13px; font-weight: 500; letter-spacing: 1px;">
-                          🔐 Email Verification
-                        </p>
-                      </div>
-                    </td>
-                  </tr>
-                  
-                  <tr>
-                    <td style="padding: 40px;">
-                      
-                      <div style="background: linear-gradient(135deg, #fff5f0 0%, #fff8f5 100%); padding: 25px 30px; border-radius: 18px; margin-bottom: 30px; border: 1px solid #ffe8e0; box-shadow: 0 4px 16px rgba(255,200,180,0.1); text-align: center;">
-                        <h2 style="margin: 0 0 10px 0; color: #c88080; font-size: 24px; font-weight: 400; font-family: 'Georgia', serif;">Welcome, ${name}! 💐</h2>
-                        <p style="margin: 0; color: #d4a5a5; font-size: 16px; font-weight: 400; line-height: 1.6;">
-                          Thank you for signing up! Please verify your email address to complete your registration.
-                        </p>
-                      </div>
-                      
-                      <div style="background: linear-gradient(135deg, #f8f5ff 0%, #faf7ff 100%); padding: 40px 30px; border-radius: 18px; margin-bottom: 30px; border: 1px solid #f0e8ff; box-shadow: 0 4px 16px rgba(200,180,220,0.08); text-align: center;">
-                        <p style="margin: 0 0 20px 0; color: #a88cb8; font-size: 14px; font-weight: 500; letter-spacing: 1px; text-transform: uppercase;">
-                          Your Verification Code
-                        </p>
-                        
-                        <div style="background-color: #ffffff; padding: 25px; border-radius: 14px; border: 2px solid #d4b5d4; box-shadow: 0 4px 16px rgba(0,0,0,0.05); margin-bottom: 20px;">
-                          <p style="margin: 0; font-size: 48px; font-weight: 700; color: #8080c0; letter-spacing: 8px; font-family: 'Courier New', monospace;">
-                            ${otp}
-                          </p>
-                        </div>
-                        
-                        <p style="margin: 0; color: #b8a0b8; font-size: 14px; line-height: 1.6;">
-                          This code will expire in <strong style="color: #8080c0;">10 minutes</strong>
-                        </p>
-                      </div>
-                      
-                      <div style="background: linear-gradient(135deg, #fff0f5 0%, #fff5f0 100%); padding: 25px 30px; border-radius: 18px; margin-bottom: 30px; border: 1px solid #ffe0e8; box-shadow: 0 4px 16px rgba(255,180,200,0.08);">
-                        <h3 style="margin: 0 0 15px 0; color: #c880a0; font-size: 16px; font-weight: 500; letter-spacing: 1px; font-family: 'Georgia', serif;">
-                          📝 How to Verify
-                        </h3>
-                        <ol style="margin: 0; padding-left: 20px; color: #b880a0; font-size: 14px; line-height: 1.8;">
-                          <li>Enter the 6-digit code on the verification page</li>
-                          <li>Click "Verify Email" button</li>
-                          <li>You'll be automatically logged in</li>
-                          <li>Start booking your favorite salon services!</li>
-                        </ol>
-                      </div>
-                      
-                      <div style="background: linear-gradient(135deg, #f0f8ff 0%, #f5faff 100%); padding: 20px 25px; border-radius: 18px; border: 1px solid #e0e8ff; box-shadow: 0 4px 16px rgba(180,200,255,0.08);">
-                        <p style="margin: 0; color: #8080c0; font-size: 13px; line-height: 1.6; text-align: center;">
-                          🔒 <strong>Security Tip:</strong> Never share this code with anyone. We'll never ask for it via phone or email.
-                        </p>
-                      </div>
-                      
-                    </td>
-                  </tr>
-                  
-                  <tr>
-                    <td style="background: linear-gradient(135deg, #f8f5f0 0%, #faf7f5 100%); padding: 30px 40px; text-align: center; border-top: 1px solid rgba(212,165,165,0.1);">
-                      <p style="margin: 0; color: #d4a5a5; font-size: 14px; font-weight: 400; line-height: 1.6; font-family: 'Georgia', serif;">
-                        If you didn't sign up for <strong style="color: #c88080;">Goodness Glamour Salon</strong>,<br>
-                        please ignore this email.
-                      </p>
-                      <p style="margin: 20px 0 0 0; color: #c0c0c0; font-size: 11px; letter-spacing: 0.5px;">
-                        Need help? Contact us: 9036626642 | 2akonsultant@gmail.com
-                      </p>
-                    </td>
-                  </tr>
-                  
-                </table>
-                
-              </td>
-            </tr>
-          </table>
-          
-        </body>
-        </html>
-      `,
-    };
-
-    await transporter.sendMail(mailOptions);
-    console.log(`✅ OTP email sent successfully to ${email}`);
+    console.log("🧪 Testing Gemini AI connection...");
+    const response = await chatWithGemini("Hello, what services do you offer?", "test-session");
+    console.log("✅ Gemini AI connection successful!");
+    resetChatSession("test-session");
     return true;
-  } catch (error: any) {
-    console.error('❌ Error sending OTP email:', error.message);
+  } catch (error) {
+    console.error("❌ Gemini AI connection failed:", error);
     return false;
   }
 }
