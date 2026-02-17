@@ -27,114 +27,40 @@ export interface BookingData {
   timestamp: string;
 }
 
-// Email configuration
-const createTransporter = async () => {
-  // Support both EMAIL_* and SMTP_* environment variables
-  const emailUser = (process.env.EMAIL_USER || process.env.SMTP_USER || '2akonsultant@gmail.com').trim();
-  const emailPasswordRaw = process.env.EMAIL_PASSWORD || process.env.SMTP_PASS || 'dcjm mwzk dwie uoxp';
-  const emailPassword = emailPasswordRaw.replace(/\s+/g, '');
-  
-  console.log(`📧 Creating email transporter with user: ${emailUser}`);
-  console.log(`📧 Password provided: ${emailPassword ? 'Yes (length: ' + emailPassword.length + ')' : 'No'}`);
-  console.log(`📧 Environment: ${process.env.NODE_ENV || 'development'}`);
-  
-  // Check if using custom SMTP server or Gmail
-  const smtpHost = process.env.SMTP_HOST;
-  const smtpPort = process.env.SMTP_PORT ? parseInt(process.env.SMTP_PORT, 10) : null;
-  
-  let transporter: nodemailer.Transporter;
-  
-  if (smtpHost && smtpPort) {
-    // Use custom SMTP server configuration
-    console.log(`📧 Using custom SMTP server: ${smtpHost}:${smtpPort}`);
-    transporter = nodemailer.createTransport({
-      host: smtpHost,
-      port: smtpPort,
-      secure: smtpPort === 465, // true for 465, false for other ports
-      auth: {
-        user: emailUser,
-        pass: emailPassword,
-      },
-      // Production-friendly connection settings for Render and other cloud platforms
-      connectionTimeout: 10000, // 10 seconds
-      greetingTimeout: 5000, // 5 seconds
-      socketTimeout: 10000, // 10 seconds
-      // Retry settings
-      tls: {
-        rejectUnauthorized: false, // Accept self-signed certificates if needed
-      },
-      // Pool connections for better performance
-      pool: true,
-      maxConnections: 1,
-      maxMessages: 3,
-    });
-  } else {
-    // Use Gmail service with enhanced production settings
-    console.log(`📧 Using Gmail service`);
-    transporter = nodemailer.createTransport({
-      service: 'gmail',
-      auth: {
-        user: emailUser,
-        pass: emailPassword, // Gmail App Password
-      },
-      // Production-friendly connection settings for Render and other cloud platforms
-      connectionTimeout: 10000, // 10 seconds - important for cloud environments
-      greetingTimeout: 5000, // 5 seconds
-      socketTimeout: 10000, // 10 seconds
-      // Retry settings
-      secure: true, // Use TLS
-      tls: {
-        rejectUnauthorized: false, // Some cloud providers need this
-      },
-      // Pool connections for better performance
-      pool: true,
-      maxConnections: 1,
-      maxMessages: 3,
-    });
+// Email configuration - supports both EMAIL_PASSWORD and EMAIL_PASS
+const getEmailPassword = () => process.env.EMAIL_PASSWORD || process.env.EMAIL_PASS || '';
+
+const createTransporter = () => {
+  const user = process.env.EMAIL_USER || '2akonsultant@gmail.com';
+  const pass = getEmailPassword();
+
+  if (!pass || pass.trim() === '') {
+    console.error('❌ EMAIL_PASSWORD (or EMAIL_PASS) is not set in .env. Booking emails will not be sent.');
+    console.error('   Add to .env: EMAIL_PASSWORD=your-gmail-app-password');
+    console.error('   Gmail requires App Password (not regular password). Generate at: https://myaccount.google.com/apppasswords');
   }
-  
-  // Verify transporter configuration before returning
-  try {
-    await transporter.verify();
-    console.log('✅ Email transporter verified successfully');
-  } catch (error) {
-    console.error('❌ Email transporter verification failed:', error);
-    if (error instanceof Error) {
-      console.error('❌ Error message:', error.message);
-      console.error('❌ Error code:', (error as any).code);
-      
-      // Provide helpful error messages for common issues
-      if (error.message.includes('Invalid login') || error.message.includes('EAUTH')) {
-        console.error('❌ AUTHENTICATION ERROR: Invalid email or password. Please check:');
-        console.error('   1. Email address is correct');
-        console.error('   2. You are using a Gmail App Password (not your regular password)');
-        console.error('   3. 2-Step Verification is enabled on your Google account');
-        console.error('   4. App Password was generated for "Mail"');
-        console.error('   5. Environment variables EMAIL_USER and EMAIL_PASSWORD are set correctly in Render');
-      } else if (error.message.includes('Less secure app')) {
-        console.error('❌ SECURITY ERROR: Gmail is blocking the connection.');
-        console.error('   Solution: Use a Gmail App Password instead of your regular password.');
-      } else if (error.message.includes('ETIMEDOUT') || error.message.includes('timeout')) {
-        console.error('❌ NETWORK ERROR: Connection timeout. This might be due to:');
-        console.error('   1. Firewall blocking SMTP ports on Render');
-        console.error('   2. Network restrictions in your cloud environment');
-        console.error('   3. Gmail rate limiting. Try again later.');
-      } else if (error.message.includes('ECONNREFUSED')) {
-        console.error('❌ CONNECTION ERROR: Cannot connect to SMTP server. Check:');
-        console.error('   1. SMTP_HOST and SMTP_PORT are correct');
-        console.error('   2. Network connectivity from Render to SMTP server');
-      }
-    }
-    throw error; // Re-throw to prevent sending emails with invalid credentials
-  }
-  
+
+  // Use explicit SMTP config - port 587 with STARTTLS works better on many hosts (Render, Vercel, etc.)
+  const transporter = nodemailer.createTransport({
+    host: 'smtp.gmail.com',
+    port: 587,
+    secure: false,
+    auth: {
+      user,
+      pass,
+    },
+    requireTLS: true,
+    connectionTimeout: 10000,
+    greetingTimeout: 10000,
+  });
+
   return transporter;
 };
 
 // Send email notification
 export async function sendContactEmail(contact: ContactMessage): Promise<boolean> {
   try {
-    const transporter = await createTransporter();
+    const transporter = createTransporter();
 
     const mailOptions = {
       from: process.env.EMAIL_USER || '2akonsultant@gmail.com',
@@ -164,7 +90,7 @@ export async function sendContactEmail(contact: ContactMessage): Promise<boolean
                       <div style="position: absolute; top: 15px; right: 15px; opacity: 0.15; font-size: 40px;">🌸</div>
                       <div style="position: absolute; bottom: 15px; left: 15px; opacity: 0.15; font-size: 40px;">🌿</div>
                       
-                      <h1 style="margin: 0; color:rgb(91, 56, 15); font-size: 36px; font-weight: 300; letter-spacing: 3px; font-family: 'Georgia', serif;">
+                      <h1 style="margin: 0; color: #d4a5a5; font-size: 36px; font-weight: 300; letter-spacing: 3px; font-family: 'Georgia', serif;">
                         Goodness Glamour
                       </h1>
                       <p style="margin: 8px 0 0 0; color: #b8a0a0; font-size: 15px; font-weight: 400; letter-spacing: 2px; font-family: 'Georgia', serif;">
@@ -416,14 +342,25 @@ export async function processContactMessage(contact: ContactMessage): Promise<{
   };
 }
 
+// Helper to log email errors with actionable hints
+const logEmailError = (context: string, error: unknown) => {
+  const err = error instanceof Error ? error : new Error(String(error));
+  const msg = err.message || '';
+  console.error(`❌ ${context}:`, msg);
+  if (msg.includes('Invalid login') || msg.includes('EAUTH') || msg.includes('authentication')) {
+    console.error('   → Gmail auth failed. Use App Password (not regular password): https://myaccount.google.com/apppasswords');
+    console.error('   → Set EMAIL_PASSWORD=your-app-password in .env');
+  }
+};
+
 // Send booking confirmation email
 export async function sendBookingEmail(booking: BookingData): Promise<boolean> {
   try {
-    console.log(`📧 Starting to send admin email for booking: ${booking.id}`);
-    console.log(`📧 Customer: ${booking.customerName}`);
-    console.log(`📧 Admin email: 2akonsultant@gmail.com`);
-    
-    const transporter = await createTransporter();
+    if (!getEmailPassword()?.trim()) {
+      console.error('❌ Skipping admin booking email: EMAIL_PASSWORD not configured');
+      return false;
+    }
+    const transporter = createTransporter();
 
     const mailOptions = {
       from: process.env.EMAIL_USER || '2akonsultant@gmail.com',
@@ -653,18 +590,11 @@ export async function sendBookingEmail(booking: BookingData): Promise<boolean> {
       `,
     };
 
-    console.log(`📧 Attempting to send admin email...`);
-    const result = await transporter.sendMail(mailOptions);
+    await transporter.sendMail(mailOptions);
     console.log('✅ Booking confirmation email sent successfully to 2akonsultant@gmail.com');
-    console.log(`📧 Email message ID: ${result.messageId}`);
-    console.log(`📧 Email response: ${JSON.stringify(result.response)}`);
     return true;
   } catch (error) {
-    console.error('❌ Error sending booking email:', error);
-    if (error instanceof Error) {
-      console.error('❌ Error message:', error.message);
-      console.error('❌ Error stack:', error.stack);
-    }
+    logEmailError('Error sending admin booking email', error);
     return false;
   }
 }
@@ -672,6 +602,10 @@ export async function sendBookingEmail(booking: BookingData): Promise<boolean> {
 // Send booking confirmation email to customer
 export async function sendCustomerBookingConfirmation(booking: BookingData): Promise<boolean> {
   try {
+    if (!getEmailPassword()?.trim()) {
+      console.error('❌ Skipping customer confirmation email: EMAIL_PASSWORD not configured');
+      return false;
+    }
     console.log(`📧 Sending customer confirmation to: ${booking.customerEmail}`);
     console.log(`📧 From: ${process.env.EMAIL_USER || '2akonsultant@gmail.com'}`);
     
@@ -691,12 +625,12 @@ export async function sendCustomerBookingConfirmation(booking: BookingData): Pro
     
     console.log(`✅ Customer email validation passed: "${booking.customerEmail}"`);
     
-    const transporter = await createTransporter();
+    const transporter = createTransporter();
 
     const mailOptions = {
       from: process.env.EMAIL_USER || '2akonsultant@gmail.com',
       to: booking.customerEmail,
-      subject: `💐 Booking Confirmed | Goodness Glamour Salon`,
+      subject: `💐 Booking Confirmed | Your Appointment at Goodness Glamour Salon`,
       html: `
         <!DOCTYPE html>
         <html>
@@ -706,84 +640,136 @@ export async function sendCustomerBookingConfirmation(booking: BookingData): Pro
         </head>
         <body style="margin: 0; padding: 0; background: linear-gradient(135deg, #fef5f1 0%, #fef9f5 50%, #f5f3f9 100%); font-family: 'Georgia', 'Times New Roman', serif;">
           
+          <!-- Main Container -->
           <table width="100%" cellpadding="0" cellspacing="0" style="background: linear-gradient(135deg, #fef5f1 0%, #fef9f5 50%, #f5f3f9 100%); padding: 40px 20px;">
             <tr>
               <td align="center">
                 
-                <table width="600" cellpadding="0" cellspacing="0" style="background-color: #ffffff; border-radius: 20px; overflow: hidden; box-shadow: 0 8px 32px rgba(0,0,0,0.08);">
+                <!-- Email Content -->
+                <table width="620" cellpadding="0" cellspacing="0" style="background-color: #ffffff; border-radius: 24px; overflow: hidden; box-shadow: 0 8px 32px rgba(0,0,0,0.08);">
                   
-                  <!-- Header -->
+                  <!-- Elegant Header -->
                   <tr>
-                    <td style="background: linear-gradient(135deg, #ffeef5 0%, #fff0f3 50%, #f9f0ff 100%); padding: 40px 30px; text-align: center;">
-                      <h1 style="margin: 0; color: #d4a5a5; font-size: 32px; font-weight: 300; letter-spacing: 2px; font-family: 'Georgia', serif;">
+                    <td style="background: linear-gradient(135deg, #ffeef5 0%, #fff0f3 50%, #f9f0ff 100%); padding: 50px 40px 40px 40px; text-align: center; position: relative;">
+                      <!-- Subtle floral corner accent -->
+                      <div style="position: absolute; top: 15px; right: 15px; opacity: 0.15; font-size: 40px;">🌸</div>
+                      <div style="position: absolute; bottom: 15px; left: 15px; opacity: 0.15; font-size: 40px;">🌿</div>
+                      
+                      <h1 style="margin: 0; color: #d4a5a5; font-size: 36px; font-weight: 300; letter-spacing: 3px; font-family: 'Georgia', serif;">
                         Goodness Glamour
                       </h1>
-                      <p style="margin: 8px 0 0 0; color: #b8a0a0; font-size: 14px; font-weight: 400; letter-spacing: 1px;">
+                      <p style="margin: 8px 0 0 0; color: #b8a0a0; font-size: 15px; font-weight: 400; letter-spacing: 2px; font-family: 'Georgia', serif;">
                         Ladies & Kids Salon
                       </p>
-                      <div style="margin-top: 20px; padding: 8px 24px; background-color: rgba(255,255,255,0.7); border-radius: 16px; display: inline-block;">
-                        <p style="margin: 0; color: #c9a0a0; font-size: 12px; font-weight: 500;">💐 Booking Confirmed</p>
+                      <div style="margin-top: 25px; padding: 10px 30px; background-color: rgba(255,255,255,0.7); border-radius: 20px; display: inline-block; border: 1px solid rgba(212,165,165,0.2);">
+                        <p style="margin: 0; color: #c9a0a0; font-size: 13px; font-weight: 500; letter-spacing: 1px;">
+                          💐 Booking Confirmed
+                        </p>
                       </div>
                     </td>
                   </tr>
                   
-                  <!-- Content -->
+                  <!-- Content Section -->
                   <tr>
-                    <td style="padding: 35px 30px;">
+                    <td style="padding: 40px;">
                       
-                      <!-- Greeting -->
-                      <p style="margin: 0 0 25px 0; color: #c88080; font-size: 18px; font-weight: 400; font-family: 'Georgia', serif;">
-                        Dear ${booking.customerName},
-                      </p>
-                      <p style="margin: 0 0 30px 0; color: #666; font-size: 15px; line-height: 1.6;">
-                        Your appointment has been confirmed! We're excited to serve you.
-                      </p>
-                      
-                      <!-- Booking Details Card -->
-                      <div style="background: linear-gradient(135deg, #f8f5ff 0%, #faf7ff 100%); padding: 25px; border-radius: 16px; margin-bottom: 25px; border: 1px solid #f0e8ff;">
-                        
-                        <!-- Booking ID -->
-                        <div style="margin-bottom: 18px; padding-bottom: 18px; border-bottom: 1px solid rgba(200,180,220,0.2);">
-                          <p style="margin: 0 0 6px 0; color: #a88cb8; font-size: 11px; font-weight: 500; text-transform: uppercase; letter-spacing: 1px;">Booking ID</p>
-                          <p style="margin: 0; color: #9880a8; font-size: 20px; font-weight: 600; font-family: 'Georgia', serif;">${booking.id}</p>
-                        </div>
-                        
-                        <!-- Date & Time -->
-                        <div style="margin-bottom: 18px; padding-bottom: 18px; border-bottom: 1px solid rgba(200,180,220,0.2);">
-                          <p style="margin: 0 0 6px 0; color: #a88cb8; font-size: 11px; font-weight: 500; text-transform: uppercase; letter-spacing: 1px;">📅 Date & Time</p>
-                          <p style="margin: 0; color: #9880a8; font-size: 16px; font-weight: 500; font-family: 'Georgia', serif;">${new Date(booking.appointmentDate).toLocaleDateString('en-IN', { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric' })} at ${booking.appointmentTime}</p>
-                        </div>
-                        
-                        <!-- Services -->
-                        <div style="margin-bottom: 18px; padding-bottom: 18px; border-bottom: 1px solid rgba(200,180,220,0.2);">
-                          <p style="margin: 0 0 8px 0; color: #a88cb8; font-size: 11px; font-weight: 500; text-transform: uppercase; letter-spacing: 1px;">✨ Services</p>
-                          <p style="margin: 0; color: #9880a8; font-size: 15px; font-weight: 500; font-family: 'Georgia', serif;">${booking.services.join(', ')}</p>
-                        </div>
-                        
-                        <!-- Address -->
-                        <div style="margin-bottom: 18px; padding-bottom: 18px; border-bottom: 1px solid rgba(200,180,220,0.2);">
-                          <p style="margin: 0 0 6px 0; color: #a88cb8; font-size: 11px; font-weight: 500; text-transform: uppercase; letter-spacing: 1px;">📍 Address</p>
-                          <p style="margin: 0; color: #9880a8; font-size: 14px; line-height: 1.5; font-family: 'Georgia', serif;">${booking.customerAddress}</p>
-                        </div>
-                        
-                        <!-- Total Amount -->
-                        <div>
-                          <p style="margin: 0 0 6px 0; color: #a88cb8; font-size: 11px; font-weight: 500; text-transform: uppercase; letter-spacing: 1px;">💰 Total Amount</p>
-                          <p style="margin: 0; color: #9880a8; font-size: 20px; font-weight: 600; font-family: 'Georgia', serif;">₹${booking.totalAmount}</p>
-                        </div>
-                      </div>
-                      
-                      <!-- Quick Reminder -->
-                      <div style="background: #fff5f0; padding: 20px; border-radius: 12px; margin-bottom: 25px; border-left: 3px solid #d4a5a5;">
-                        <p style="margin: 0; color: #666; font-size: 13px; line-height: 1.6;">
-                          <strong style="color: #c88080;">💡 Reminder:</strong> Our team will arrive at your doorstep at the scheduled time. For any changes, please contact us at least 2 hours in advance.
+                      <!-- Welcome Message -->
+                      <div style="background: linear-gradient(135deg, #fff5f0 0%, #fff8f5 100%); padding: 25px 30px; border-radius: 18px; margin-bottom: 30px; border: 1px solid #ffe8e0; box-shadow: 0 4px 16px rgba(255,200,180,0.1); text-align: center;">
+                        <h2 style="margin: 0 0 10px 0; color: #c88080; font-size: 24px; font-weight: 400; font-family: 'Georgia', serif;">Dear ${booking.customerName},</h2>
+                        <p style="margin: 0; color: #d4a5a5; font-size: 16px; font-weight: 400; line-height: 1.6;">
+                          Your appointment has been successfully confirmed! We're excited to pamper you with our premium beauty services.
                         </p>
                       </div>
                       
-                      <!-- Contact -->
-                      <div style="text-align: center; padding-top: 20px; border-top: 1px solid #f0f0f0;">
-                        <p style="margin: 0 0 8px 0; color: #999; font-size: 13px;">Need help? Call us: <strong style="color: #c88080;">9036626642</strong></p>
-                        <p style="margin: 0; color: #999; font-size: 13px;">Email: <strong style="color: #c88080;">2akonsultant@gmail.com</strong></p>
+                      <!-- Booking Details -->
+                      <div style="background: linear-gradient(135deg, #f8f5ff 0%, #faf7ff 100%); padding: 30px; border-radius: 18px; margin-bottom: 30px; border: 1px solid #f0e8ff; box-shadow: 0 4px 16px rgba(200,180,220,0.08);">
+                        <h3 style="margin: 0 0 25px 0; color: #a88cb8; font-size: 16px; font-weight: 500; letter-spacing: 1px; font-family: 'Georgia', serif; border-bottom: 1px solid rgba(200,180,220,0.2); padding-bottom: 12px;">
+                          Your Appointment Details
+                        </h3>
+                        
+                        <!-- Date & Time -->
+                        <div style="background-color: #ffffff; padding: 18px 20px; border-radius: 14px; margin-bottom: 15px; border-left: 3px solid #d4b5d4; box-shadow: 0 2px 8px rgba(0,0,0,0.03);">
+                          <table width="100%" cellpadding="0" cellspacing="0">
+                            <tr>
+                              <td width="35" valign="middle">
+                                <span style="font-size: 20px; opacity: 0.7;">📅</span>
+                              </td>
+                              <td>
+                                <p style="margin: 0 0 4px 0; color: #b8a0b8; font-size: 11px; font-weight: 500; text-transform: uppercase; letter-spacing: 1px;">Date & Time</p>
+                                <p style="margin: 0; color: #9880a8; font-size: 16px; font-weight: 500; font-family: 'Georgia', serif;">${new Date(booking.appointmentDate).toLocaleDateString('en-IN', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })} at ${booking.appointmentTime}</p>
+                              </td>
+                            </tr>
+                          </table>
+                        </div>
+                        
+                        <!-- Services -->
+                        <div style="background-color: #ffffff; padding: 18px 20px; border-radius: 14px; margin-bottom: 15px; border-left: 3px solid #d4b5d4; box-shadow: 0 2px 8px rgba(0,0,0,0.03);">
+                          <table width="100%" cellpadding="0" cellspacing="0">
+                            <tr>
+                              <td width="35" valign="middle">
+                                <span style="font-size: 20px; opacity: 0.7;">✨</span>
+                              </td>
+                              <td>
+                                <p style="margin: 0 0 4px 0; color: #b8a0b8; font-size: 11px; font-weight: 500; text-transform: uppercase; letter-spacing: 1px;">Services</p>
+                                <p style="margin: 0; color: #9880a8; font-size: 16px; font-weight: 500; font-family: 'Georgia', serif;">${booking.services}</p>
+                              </td>
+                            </tr>
+                          </table>
+                        </div>
+                        
+                        <!-- Location -->
+                        <div style="background-color: #ffffff; padding: 18px 20px; border-radius: 14px; margin-bottom: 15px; border-left: 3px solid #d4b5d4; box-shadow: 0 2px 8px rgba(0,0,0,0.03);">
+                          <table width="100%" cellpadding="0" cellspacing="0">
+                            <tr>
+                              <td width="35" valign="middle">
+                                <span style="font-size: 20px; opacity: 0.7;">📍</span>
+                              </td>
+                              <td>
+                                <p style="margin: 0 0 4px 0; color: #b8a0b8; font-size: 11px; font-weight: 500; text-transform: uppercase; letter-spacing: 1px;">Location</p>
+                                <p style="margin: 0; color: #9880a8; font-size: 16px; font-weight: 500; font-family: 'Georgia', serif;">${booking.notes || 'No location specified'}</p>
+                              </td>
+                            </tr>
+                          </table>
+                        </div>
+                        
+                        <!-- Total Amount -->
+                        <div style="background-color: #ffffff; padding: 18px 20px; border-radius: 14px; border-left: 3px solid #d4b5d4; box-shadow: 0 2px 8px rgba(0,0,0,0.03);">
+                          <table width="100%" cellpadding="0" cellspacing="0">
+                            <tr>
+                              <td width="35" valign="middle">
+                                <span style="font-size: 20px; opacity: 0.7;">💰</span>
+                              </td>
+                              <td>
+                                <p style="margin: 0 0 4px 0; color: #b8a0b8; font-size: 11px; font-weight: 500; text-transform: uppercase; letter-spacing: 1px;">Total Amount</p>
+                                <p style="margin: 0; color: #9880a8; font-size: 16px; font-weight: 500; font-family: 'Georgia', serif;">₹${booking.totalAmount}</p>
+                              </td>
+                            </tr>
+                          </table>
+                        </div>
+                      </div>
+                      
+                      <!-- Important Notes -->
+                      <div style="background: linear-gradient(135deg, #fff0f5 0%, #fff5f0 100%); padding: 25px 30px; border-radius: 18px; margin-bottom: 30px; border: 1px solid #ffe0e8; box-shadow: 0 4px 16px rgba(255,180,200,0.08);">
+                        <h3 style="margin: 0 0 15px 0; color: #c880a0; font-size: 16px; font-weight: 500; letter-spacing: 1px; font-family: 'Georgia', serif;">
+                          📝 Important Reminders
+                        </h3>
+                        <ul style="margin: 0; padding-left: 20px; color: #b880a0; font-size: 14px; line-height: 1.8;">
+                          <li>Please arrive 10 minutes before your scheduled time</li>
+                          <li>Bring a valid ID for verification</li>
+                          <li>For any changes, please contact us at least 2 hours in advance</li>
+                          <li>We offer doorstep service - our team will arrive at your specified location</li>
+                        </ul>
+                      </div>
+                      
+                      <!-- Contact Information -->
+                      <div style="background: linear-gradient(135deg, #f0f8ff 0%, #f5faff 100%); padding: 25px 30px; border-radius: 18px; border: 1px solid #e0e8ff; box-shadow: 0 4px 16px rgba(180,200,255,0.08);">
+                        <h3 style="margin: 0 0 20px 0; color: #8080c0; font-size: 16px; font-weight: 500; letter-spacing: 1px; font-family: 'Georgia', serif; text-align: center;">
+                          📞 Need Help?
+                        </h3>
+                        <div style="text-align: center;">
+                          <p style="margin: 0 0 8px 0; color: #a0a0d0; font-size: 14px; font-weight: 400;">Call us: <strong style="color: #8080c0;">+91 9876543210</strong></p>
+                          <p style="margin: 0; color: #a0a0d0; font-size: 14px; font-weight: 400;">Email: <strong style="color: #8080c0;">2akonsultant@gmail.com</strong></p>
+                        </div>
                       </div>
                       
                     </td>
@@ -791,13 +777,17 @@ export async function sendCustomerBookingConfirmation(booking: BookingData): Pro
                   
                   <!-- Footer -->
                   <tr>
-                    <td style="background: #fafafa; padding: 25px 30px; text-align: center; border-top: 1px solid #f0f0f0;">
-                      <p style="margin: 0; color: #d4a5a5; font-size: 13px; font-weight: 400; font-family: 'Georgia', serif;">
-                        Thank you for choosing <strong style="color: #c88080;">Goodness Glamour</strong>!
+                    <td style="background: linear-gradient(135deg, #f8f5f0 0%, #faf7f5 100%); padding: 30px 40px; text-align: center; border-top: 1px solid rgba(212,165,165,0.1);">
+                      <p style="margin: 0; color: #d4a5a5; font-size: 14px; font-weight: 400; line-height: 1.6; font-family: 'Georgia', serif;">
+                        Thank you for choosing <strong style="color: #c88080;">Goodness Glamour Salon</strong>!<br>
+                        We look forward to making you feel beautiful and confident.
                       </p>
-                      <p style="margin: 15px 0 0 0; color: #c0c0c0; font-size: 11px;">
-                        Automated confirmation • Goodness Glamour Salon
+                      <p style="margin: 20px 0 0 0; color: #c0c0c0; font-size: 11px; letter-spacing: 0.5px;">
+                        Automated confirmation • Goodness Glamour Salon<br>
+                        Your booking details have been saved
                       </p>
+                      <!-- Subtle floral footer accent -->
+                      <p style="margin: 15px 0 0 0; opacity: 0.2; font-size: 20px;">🌸 🌿 🌸</p>
                     </td>
                   </tr>
                   
@@ -812,22 +802,12 @@ export async function sendCustomerBookingConfirmation(booking: BookingData): Pro
       `,
     };
 
-    console.log(`📧 Attempting to send customer email to: ${booking.customerEmail}...`);
     const result = await transporter.sendMail(mailOptions);
     console.log(`✅ Customer booking confirmation sent successfully to ${booking.customerEmail}`);
-    console.log(`📧 Email message ID: ${result.messageId}`);
-    console.log(`📧 Email response: ${JSON.stringify(result.response)}`);
+    console.log(`📧 Email result:`, result.messageId);
     return true;
   } catch (error) {
-    console.error('❌ Error sending customer booking confirmation:', error);
-    if (error instanceof Error) {
-      console.error('❌ Error message:', error.message);
-      console.error('❌ Error code:', (error as any).code);
-      console.error('❌ Error command:', (error as any).command);
-      console.error('❌ Error stack:', error.stack);
-    } else {
-      console.error('❌ Error details:', String(error));
-    }
+    logEmailError('Error sending customer booking confirmation', error);
     return false;
   }
 }
@@ -898,7 +878,7 @@ export async function updateBookingExcelFile(booking: BookingData): Promise<bool
 export async function testEmailConfiguration(): Promise<boolean> {
   try {
     console.log('🧪 Testing email configuration...');
-    const transporter = await createTransporter();
+    const transporter = createTransporter();
     
     const testMailOptions = {
       from: process.env.EMAIL_USER || '2akonsultant@gmail.com',
@@ -926,10 +906,15 @@ export async function processBooking(booking: BookingData): Promise<{
 }> {
   try {
     console.log(`📧 Processing booking from: ${booking.customerName}`);
-    
-    // Update Excel file
-    const excelUpdated = await updateBookingExcelFile(booking);
-    
+
+    // Update Excel file (don't let Excel failures block emails)
+    let excelUpdated = false;
+    try {
+      excelUpdated = await updateBookingExcelFile(booking);
+    } catch (excelErr) {
+      console.error('❌ Excel update failed (emails will still be sent):', excelErr);
+    }
+
     // Send email to admin
     const adminEmailSent = await sendBookingEmail(booking);
     
@@ -985,7 +970,7 @@ export async function sendOTPEmail(
   try {
     console.log(`📧 Sending OTP to: ${email}`);
     
-    const transporter = await createTransporter();
+    const transporter = createTransporter();
 
     const mailOptions = {
       from: process.env.EMAIL_USER || '2akonsultant@gmail.com',
