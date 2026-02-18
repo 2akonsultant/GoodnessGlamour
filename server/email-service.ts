@@ -58,10 +58,16 @@ const createTransporter = () => {
   const user = process.env.EMAIL_USER || '2akonsultant@gmail.com';
   const pass = getEmailPassword();
 
+  // Enhanced logging for Render debugging
   if (!pass || pass.trim() === '') {
-    console.error('❌ EMAIL_PASSWORD (or EMAIL_PASS) is not set in .env. Booking emails will not be sent.');
-    console.error('   Add to .env: EMAIL_PASSWORD=your-gmail-app-password');
-    console.error('   Gmail requires App Password (not regular password). Generate at: https://myaccount.google.com/apppasswords');
+    console.error('❌ EMAIL_PASSWORD (or EMAIL_PASS) is not set. Booking emails will not be sent.');
+    console.error('   → Render: Go to Dashboard → Your Service → Environment');
+    console.error('   → Add: EMAIL_USER=your-email@gmail.com');
+    console.error('   → Add: EMAIL_PASSWORD=your-16-char-app-password');
+    console.error('   → Generate App Password at: https://myaccount.google.com/apppasswords');
+    console.error('   → After adding, restart your Render service');
+  } else {
+    console.log(`✅ Email configuration found: USER=${user}, PASSWORD=${pass.length} chars`);
   }
 
   // Try port 465 first (SSL) - more reliable on some networks
@@ -621,8 +627,20 @@ const sendCustomerEmailViaEmailJS = async (booking: BookingData): Promise<boolea
 // Send booking confirmation email
 export async function sendBookingEmail(booking: BookingData): Promise<boolean> {
   try {
-    if (!getEmailPassword()?.trim()) {
+    const emailPassword = getEmailPassword();
+    const emailUser = process.env.EMAIL_USER || '2akonsultant@gmail.com';
+    
+    // Enhanced logging for Render debugging
+    console.log('📧 sendBookingEmail called');
+    console.log(`📧 EMAIL_USER: ${emailUser}`);
+    console.log(`📧 EMAIL_PASSWORD: ${emailPassword ? 'SET (length: ' + emailPassword.length + ')' : 'NOT SET'}`);
+    console.log(`📧 EMAIL_PASS (alt): ${process.env.EMAIL_PASS ? 'SET' : 'NOT SET'}`);
+    
+    if (!emailPassword?.trim()) {
       console.error('❌ Skipping admin booking email: EMAIL_PASSWORD not configured');
+      console.error('   → Check Render Dashboard → Environment Variables');
+      console.error('   → Required: EMAIL_USER and EMAIL_PASSWORD');
+      console.error('   → EMAIL_PASSWORD must be Gmail App Password (16 characters)');
       return false;
     }
 
