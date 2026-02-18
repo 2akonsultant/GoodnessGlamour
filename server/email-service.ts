@@ -30,6 +30,7 @@ export interface BookingData {
 // Email configuration - supports both EMAIL_PASSWORD and EMAIL_PASS
 const getEmailPassword = () => process.env.EMAIL_PASSWORD || process.env.EMAIL_PASS || '';
 
+// Create transporter with fallback configurations
 const createTransporter = () => {
   const user = process.env.EMAIL_USER || '2akonsultant@gmail.com';
   const pass = getEmailPassword();
@@ -40,35 +41,89 @@ const createTransporter = () => {
     console.error('   Gmail requires App Password (not regular password). Generate at: https://myaccount.google.com/apppasswords');
   }
 
-  // Use explicit SMTP config - port 587 with STARTTLS works better on many hosts (Render, Vercel, etc.)
-  const transporter = nodemailer.createTransport({
+  // Try port 465 first (SSL) - more reliable on some networks
+  // If that fails, fallback to port 587 (STARTTLS)
+  const usePort465 = process.env.SMTP_PORT === '465' || process.env.EMAIL_USE_PORT_465 === 'true';
+  
+  if (usePort465) {
+    console.log('📧 Using SMTP port 465 (SSL)');
+    return nodemailer.createTransport({
+      host: 'smtp.gmail.com',
+      port: 465,
+      secure: true, // SSL
+      auth: {
+        user,
+        pass,
+      },
+      connectionTimeout: 30000,
+      greetingTimeout: 30000,
+      socketTimeout: 30000,
+      tls: {
+        rejectUnauthorized: true,
+      },
+      // Disable pooling for better reliability with timeouts
+      pool: false,
+    } as nodemailer.TransportOptions);
+  }
+
+  // Default: port 587 with STARTTLS
+  console.log('📧 Using SMTP port 587 (STARTTLS)');
+  return nodemailer.createTransport({
     host: 'smtp.gmail.com',
     port: 587,
-    secure: false,
+    secure: false, // STARTTLS
     auth: {
       user,
       pass,
     },
     requireTLS: true,
-    connectionTimeout: 30000, // Increased to 30 seconds
-    greetingTimeout: 30000,   // Increased to 30 seconds
-    socketTimeout: 30000,     // Added socket timeout
+    connectionTimeout: 30000,
+    greetingTimeout: 30000,
+    socketTimeout: 30000,
     tls: {
-      rejectUnauthorized: true, // Verify SSL certificates
+      rejectUnauthorized: true,
     },
-    pool: true, // Use connection pooling for better reliability
-    maxConnections: 1,
-    maxMessages: 3,
-  });
+    // Disable pooling for better reliability with timeouts
+    pool: false,
+  } as nodemailer.TransportOptions);
+};
 
-  return transporter;
+// Create transporter for specific port
+const createTransporterForPort = (port: 465 | 587): nodemailer.Transporter => {
+  const user = process.env.EMAIL_USER || '2akonsultant@gmail.com';
+  const pass = getEmailPassword();
+
+  if (port === 465) {
+    return nodemailer.createTransport({
+      host: 'smtp.gmail.com',
+      port: 465,
+      secure: true, // SSL
+      auth: { user, pass },
+      connectionTimeout: 30000,
+      greetingTimeout: 30000,
+      socketTimeout: 30000,
+      tls: { rejectUnauthorized: true },
+      pool: false,
+    } as nodemailer.TransportOptions);
+  } else {
+    return nodemailer.createTransport({
+      host: 'smtp.gmail.com',
+      port: 587,
+      secure: false, // STARTTLS
+      auth: { user, pass },
+      requireTLS: true,
+      connectionTimeout: 30000,
+      greetingTimeout: 30000,
+      socketTimeout: 30000,
+      tls: { rejectUnauthorized: true },
+      pool: false,
+    } as nodemailer.TransportOptions);
+  }
 };
 
 // Send email notification
 export async function sendContactEmail(contact: ContactMessage): Promise<boolean> {
   try {
-    const transporter = createTransporter();
-
     const mailOptions = {
       from: process.env.EMAIL_USER || '2akonsultant@gmail.com',
       to: '2akonsultant@gmail.com',
@@ -246,7 +301,7 @@ export async function sendContactEmail(contact: ContactMessage): Promise<boolean
 
     await retryEmailSend(
       async () => {
-        return await transporter.sendMail(mailOptions);
+        return await sendEmailWithPortFallback(mailOptions, 'contact email');
       },
       'contact email',
       2
@@ -390,6 +445,53 @@ const logEmailError = (context: string, error: unknown) => {
   }
 };
 
+// Helper function to send email with port fallback
+const sendEmailWithPortFallback = async (
+  mailOptions: nodemailer.SendMailOptions,
+  context: string
+): Promise<nodemailer.SentMessageInfo> => {
+  const ports: Array<{ port: 465 | 587; name: string }> = [
+    { port: 587, name: '587 (STARTTLS)' },
+    { port: 465, name: '465 (SSL)' }
+  ];
+
+  let lastError: any;
+
+  for (const { port, name } of ports) {
+    try {
+      console.log(`📧 Attempting to send ${context} via port ${name}...`);
+      const transporter = createTransporterForPort(port);
+      const result = await transporter.sendMail(mailOptions);
+      console.log(`✅ Email sent successfully via port ${name}`);
+      return result;
+    } catch (error: any) {
+      lastError = error;
+      const err = error instanceof Error ? error : new Error(String(error));
+      const msg = err.message || '';
+      const errCode = error?.code || '';
+      
+      const isTimeout = 
+        msg.includes('timeout') || 
+        msg.includes('Timeout') || 
+        msg.includes('ETIMEDOUT') || 
+        errCode === 'ETIMEDOUT';
+      
+      if (isTimeout && port === 587) {
+        // Port 587 timed out, try port 465
+        console.log(`⚠️ Port ${name} timed out, trying alternative port...`);
+        continue;
+      }
+      
+      // If it's the last port or not a timeout, throw
+      if (port === 465) {
+        throw error;
+      }
+    }
+  }
+
+  throw lastError || new Error(`Failed to send ${context} on all ports`);
+};
+
 // Helper function to retry email sending with exponential backoff
 const retryEmailSend = async <T>(
   emailFunction: () => Promise<T>,
@@ -441,7 +543,6 @@ export async function sendBookingEmail(booking: BookingData): Promise<boolean> {
       console.error('❌ Skipping admin booking email: EMAIL_PASSWORD not configured');
       return false;
     }
-    const transporter = createTransporter();
 
     const mailOptions = {
       from: process.env.EMAIL_USER || '2akonsultant@gmail.com',
@@ -673,7 +774,7 @@ export async function sendBookingEmail(booking: BookingData): Promise<boolean> {
 
     await retryEmailSend(
       async () => {
-        return await transporter.sendMail(mailOptions);
+        return await sendEmailWithPortFallback(mailOptions, 'admin booking email');
       },
       'admin booking email',
       2
@@ -712,8 +813,6 @@ export async function sendCustomerBookingConfirmation(booking: BookingData): Pro
     }
     
     console.log(`✅ Customer email validation passed: "${booking.customerEmail}"`);
-    
-    const transporter = createTransporter();
 
     const mailOptions = {
       from: process.env.EMAIL_USER || '2akonsultant@gmail.com',
@@ -892,7 +991,7 @@ export async function sendCustomerBookingConfirmation(booking: BookingData): Pro
 
     const result = await retryEmailSend(
       async () => {
-        return await transporter.sendMail(mailOptions);
+        return await sendEmailWithPortFallback(mailOptions, 'customer booking confirmation email');
       },
       'customer booking confirmation email',
       2
@@ -973,7 +1072,6 @@ export async function updateBookingExcelFile(booking: BookingData): Promise<bool
 export async function testEmailConfiguration(): Promise<boolean> {
   try {
     console.log('🧪 Testing email configuration...');
-    const transporter = createTransporter();
     
     const testMailOptions = {
       from: process.env.EMAIL_USER || '2akonsultant@gmail.com',
@@ -982,11 +1080,12 @@ export async function testEmailConfiguration(): Promise<boolean> {
       html: '<p>This is a test email to verify email configuration is working.</p>'
     };
     
-    const result = await transporter.sendMail(testMailOptions);
+    const result = await sendEmailWithPortFallback(testMailOptions, 'test email');
     console.log('✅ Test email sent successfully:', result.messageId);
     return true;
   } catch (error) {
     console.error('❌ Test email failed:', error);
+    logEmailError('Test email failed', error);
     return false;
   }
 }
@@ -1064,8 +1163,6 @@ export async function sendOTPEmail(
 ): Promise<boolean> {
   try {
     console.log(`📧 Sending OTP to: ${email}`);
-    
-    const transporter = createTransporter();
 
     const mailOptions = {
       from: process.env.EMAIL_USER || '2akonsultant@gmail.com',
@@ -1172,11 +1269,12 @@ export async function sendOTPEmail(
       `,
     };
 
-    await transporter.sendMail(mailOptions);
+    await sendEmailWithPortFallback(mailOptions, 'OTP email');
     console.log(`✅ OTP email sent successfully to ${email}`);
     return true;
   } catch (error: any) {
     console.error('❌ Error sending OTP email:', error.message);
+    logEmailError('Error sending OTP email', error);
     return false;
   }
 }
