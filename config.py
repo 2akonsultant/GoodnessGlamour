@@ -12,10 +12,8 @@ class Config:
     # Gemini AI Configuration
     GEMINI_API_KEY: str = os.getenv("GEMINI_API_KEY", "AIzaSyDEw4nW0xV_FQKf1SUX9fFJwnEY5n8_Jwc")
     
-    # Twilio Configuration
-    TWILIO_ACCOUNT_SID: str = os.getenv("TWILIO_ACCOUNT_SID", "ACd8941e7d6933a9e031879bc28d7af7e8")
-    TWILIO_AUTH_TOKEN: str = os.getenv("TWILIO_AUTH_TOKEN", "815e90983ed99b02e52943cc14602d56")
-    TWILIO_PHONE_NUMBER: str = os.getenv("TWILIO_PHONE_NUMBER", "+917019035686")
+    # Twilio Configuration - REMOVED (SMS and calls no longer use Twilio)
+    # Use email and WhatsApp services instead
     
     # Webhook Configuration
     WEBHOOK_URL: str = os.getenv("WEBHOOK_URL", "https://your-domain.com")  # Replace with your domain
@@ -52,9 +50,6 @@ class Config:
         """Validate that all required configuration is present"""
         required_fields = [
             "GEMINI_API_KEY",
-            "TWILIO_ACCOUNT_SID", 
-            "TWILIO_AUTH_TOKEN",
-            "TWILIO_PHONE_NUMBER",
             "WEBHOOK_URL"
         ]
         
