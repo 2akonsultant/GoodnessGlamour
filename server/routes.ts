@@ -955,7 +955,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
       
       // Process booking (send email and update Excel) in background
-      console.log(`📧 Booking details - Name: ${customer.name}, Email: "${customer.email || ''}"`);
+      console.log(`📧 Processing booking - Name: ${customer.name}, Email: "${customer.email || ''}"`);
+      console.log(`📧 Email service available: ${!!(process.env.EMAIL_PASSWORD || process.env.EMAIL_PASS)}`);
       processBooking({
         id: booking.id,
         customerName: customer.name,
@@ -1458,6 +1459,30 @@ app.get("/api/dashboard/messages", async (req, res) => {
   }
 });
 
+  // Email configuration test endpoint (for debugging on Render)
+  app.get("/api/test/email-config", async (req, res) => {
+    try {
+      const emailUser = process.env.EMAIL_USER || '2akonsultant@gmail.com';
+      const emailPassword = process.env.EMAIL_PASSWORD || process.env.EMAIL_PASS || '';
+      const smtpPort = process.env.SMTP_PORT || 'default (587)';
+      
+      const config = {
+        emailUser,
+        emailPasswordSet: !!emailPassword,
+        emailPasswordLength: emailPassword ? emailPassword.length : 0,
+        smtpPort,
+        canSendEmail: !!emailPassword,
+        environment: process.env.NODE_ENV || 'development',
+        renderEnv: process.env.RENDER ? 'true' : 'false'
+      };
+      
+      console.log('📧 Email Config Test:', config);
+      res.json(config);
+    } catch (error) {
+      res.status(500).json({ error: String(error) });
+    }
+  });
+
   // Test Gemini AI connection on startup
   console.log("\n🤖 Testing Gemini AI connection...");
   testGeminiConnection().then(success => {
@@ -1467,6 +1492,21 @@ app.get("/api/dashboard/messages", async (req, res) => {
       console.log("⚠️ Gemini AI connection failed - using fallback responses\n");
     }
   });
+  
+  // Log email configuration on startup
+  console.log("\n📧 Email Configuration Check:");
+  const emailPassword = process.env.EMAIL_PASSWORD || process.env.EMAIL_PASS || '';
+  const emailUser = process.env.EMAIL_USER || '2akonsultant@gmail.com';
+  console.log(`   EMAIL_USER: ${emailUser}`);
+  console.log(`   EMAIL_PASSWORD: ${emailPassword ? 'SET (' + emailPassword.length + ' chars)' : 'NOT SET ❌'}`);
+  if (!emailPassword) {
+    console.log('   ⚠️  WARNING: Emails will not be sent without EMAIL_PASSWORD');
+    console.log('   → Set in Render Dashboard → Environment Variables');
+    console.log('   → Use Gmail App Password from: https://myaccount.google.com/apppasswords');
+  } else {
+    console.log('   ✅ Email service is configured');
+  }
+  console.log('');
 
   const httpServer = createServer(app);
   return httpServer;
