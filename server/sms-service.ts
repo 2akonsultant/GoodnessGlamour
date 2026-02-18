@@ -1,11 +1,6 @@
 import axios from 'axios';
 
 export interface SMSConfig {
-  // Twilio Configuration
-  twilioAccountSid?: string;
-  twilioAuthToken?: string;
-  twilioFromNumber?: string;
-  
   // TextLocal Configuration (India-focused, cheaper alternative)
   textlocalApiKey?: string;
   textlocalSender?: string;
@@ -52,7 +47,6 @@ class SMSService {
     const providers = [
       { name: 'TextLocal', method: this.sendViaTextLocal.bind(this) },
       { name: 'MSG91', method: this.sendViaMSG91.bind(this) },
-      { name: 'Twilio', method: this.sendViaTwilio.bind(this) },
       { name: 'Generic Gateway', method: this.sendViaGenericGateway.bind(this) }
     ];
 
@@ -233,35 +227,6 @@ class SMSService {
   }
 
   /**
-   * Send SMS via Twilio (Global, more expensive but reliable)
-   */
-  private async sendViaTwilio(smsMessage: SMSMessage): Promise<SMSResult> {
-    if (!this.config.twilioAccountSid || !this.config.twilioAuthToken) {
-      throw new Error('Twilio credentials not configured');
-    }
-
-    const response = await axios.post(
-      `https://api.twilio.com/2010-04-01/Accounts/${this.config.twilioAccountSid}/Messages.json`,
-      new URLSearchParams({
-        To: smsMessage.to,
-        From: this.config.twilioFromNumber || '+1234567890',
-        Body: smsMessage.message
-      }),
-      {
-        auth: {
-          username: this.config.twilioAccountSid,
-          password: this.config.twilioAuthToken
-        }
-      }
-    );
-
-    return {
-      success: true,
-      messageId: response.data.sid
-    };
-  }
-
-  /**
    * Send SMS via Generic SMS Gateway
    */
   private async sendViaGenericGateway(smsMessage: SMSMessage): Promise<SMSResult> {
@@ -377,11 +342,6 @@ const createSMSService = (): SMSService => {
     msg91ApiKey: process.env.MSG91_API_KEY,
     msg91SenderId: process.env.MSG91_SENDER_ID || 'GLAMOR',
     msg91TemplateId: process.env.MSG91_TEMPLATE_ID,
-    
-    // Twilio Configuration (Global but more expensive)
-    twilioAccountSid: process.env.TWILIO_ACCOUNT_SID,
-    twilioAuthToken: process.env.TWILIO_AUTH_TOKEN,
-    twilioFromNumber: process.env.TWILIO_FROM_NUMBER,
     
     // Generic SMS Gateway Configuration
     smsGatewayUrl: process.env.SMS_GATEWAY_URL,
