@@ -1,4 +1,5 @@
 import nodemailer from 'nodemailer';
+import axios from 'axios';
 import XLSX from 'xlsx';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -29,6 +30,28 @@ export interface BookingData {
 
 // Email configuration - supports both EMAIL_PASSWORD and EMAIL_PASS
 const getEmailPassword = () => process.env.EMAIL_PASSWORD || process.env.EMAIL_PASS || '';
+
+// EmailJS configuration for customer confirmation emails
+const EMAILJS_API_URL =
+  process.env.EMAILJS_API_URL || 'https://api.emailjs.com/api/v1.0/email/send';
+
+const EMAILJS_SERVICE_ID_CUSTOMER =
+  process.env.EMAILJS_SERVICE_ID_CUSTOMER ||
+  process.env.EMAILJS_SERVICE_ID ||
+  'service_ud02gf4';
+
+const EMAILJS_TEMPLATE_ID_BOOKING =
+  process.env.EMAILJS_TEMPLATE_ID_BOOKING ||
+  process.env.EMAILJS_TEMPLATE_ID ||
+  'template_teud7z7';
+
+const EMAILJS_PUBLIC_KEY =
+  process.env.EMAILJS_PUBLIC_KEY ||
+  process.env.EMAILJS_USER_ID ||
+  'x8poTA6boU0QKFefd';
+
+const isEmailJSConfigured = () =>
+  Boolean(EMAILJS_SERVICE_ID_CUSTOMER && EMAILJS_TEMPLATE_ID_BOOKING && EMAILJS_PUBLIC_KEY);
 
 // Create transporter with fallback configurations
 const createTransporter = () => {
@@ -536,6 +559,65 @@ const retryEmailSend = async <T>(
   throw lastError || new Error(`Failed to send ${context} after ${maxRetries} attempts`);
 };
 
+// Send customer booking confirmation via EmailJS (for customers only)
+const sendCustomerEmailViaEmailJS = async (booking: BookingData): Promise<boolean> => {
+  if (!isEmailJSConfigured()) {
+    console.error(
+      '❌ EmailJS is not configured. Missing EMAILJS_SERVICE_ID_CUSTOMER / EMAILJS_TEMPLATE_ID_BOOKING / EMAILJS_PUBLIC_KEY in environment.'
+    );
+    return false;
+  }
+
+  try {
+    // Format appointment date for better readability
+    const formattedDate = new Date(booking.appointmentDate).toLocaleDateString('en-IN', {
+      weekday: 'long',
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric',
+    });
+
+    const templateParams = {
+      customer_name: booking.customerName,
+      customer_email: booking.customerEmail,
+      customer_phone: booking.customerPhone,
+      appointment_date: formattedDate,
+      appointment_time: booking.appointmentTime,
+      services: booking.services.join(', '),
+      total_amount: `₹${booking.totalAmount}`,
+      customer_address: booking.customerAddress,
+      booking_id: booking.id,
+      notes: booking.notes || '',
+    };
+
+    const payload = {
+      service_id: EMAILJS_SERVICE_ID_CUSTOMER,
+      template_id: EMAILJS_TEMPLATE_ID_BOOKING,
+      user_id: EMAILJS_PUBLIC_KEY,
+      template_params: templateParams,
+    };
+
+    console.log('📧 Sending customer confirmation via EmailJS with payload:', {
+      service_id: payload.service_id,
+      template_id: payload.template_id,
+      has_template_params: Boolean(payload.template_params),
+    });
+
+    const response = await axios.post(EMAILJS_API_URL, payload, {
+      timeout: 30000,
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    });
+
+    console.log('✅ EmailJS customer confirmation response:', response.data);
+    return true;
+  } catch (error) {
+    logEmailError('Error sending customer booking confirmation via EmailJS', error);
+    return false;
+  }
+};
+
 // Send booking confirmation email
 export async function sendBookingEmail(booking: BookingData): Promise<boolean> {
   try {
@@ -788,15 +870,10 @@ export async function sendBookingEmail(booking: BookingData): Promise<boolean> {
   }
 }
 
-// Send booking confirmation email to customer
+// Send booking confirmation email to customer (via EmailJS)
 export async function sendCustomerBookingConfirmation(booking: BookingData): Promise<boolean> {
   try {
-    if (!getEmailPassword()?.trim()) {
-      console.error('❌ Skipping customer confirmation email: EMAIL_PASSWORD not configured');
-      return false;
-    }
-    console.log(`📧 Sending customer confirmation to: ${booking.customerEmail}`);
-    console.log(`📧 From: ${process.env.EMAIL_USER || '2akonsultant@gmail.com'}`);
+    console.log(`📧 Sending customer confirmation (via EmailJS) to: ${booking.customerEmail}`);
     
     // Check if customer email is provided
     console.log(`📧 Validating customer email: "${booking.customerEmail}"`);
@@ -814,194 +891,18 @@ export async function sendCustomerBookingConfirmation(booking: BookingData): Pro
     
     console.log(`✅ Customer email validation passed: "${booking.customerEmail}"`);
 
-    const mailOptions = {
-      from: process.env.EMAIL_USER || '2akonsultant@gmail.com',
-      to: booking.customerEmail,
-      subject: `💐 Booking Confirmed | Your Appointment at Goodness Glamour Salon`,
-      html: `
-        <!DOCTYPE html>
-        <html>
-        <head>
-          <meta charset="UTF-8">
-          <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        </head>
-        <body style="margin: 0; padding: 0; background: linear-gradient(135deg, #fef5f1 0%, #fef9f5 50%, #f5f3f9 100%); font-family: 'Georgia', 'Times New Roman', serif;">
-          
-          <!-- Main Container -->
-          <table width="100%" cellpadding="0" cellspacing="0" style="background: linear-gradient(135deg, #fef5f1 0%, #fef9f5 50%, #f5f3f9 100%); padding: 40px 20px;">
-            <tr>
-              <td align="center">
-                
-                <!-- Email Content -->
-                <table width="620" cellpadding="0" cellspacing="0" style="background-color: #ffffff; border-radius: 24px; overflow: hidden; box-shadow: 0 8px 32px rgba(0,0,0,0.08);">
-                  
-                  <!-- Elegant Header -->
-                  <tr>
-                    <td style="background: linear-gradient(135deg, #ffeef5 0%, #fff0f3 50%, #f9f0ff 100%); padding: 50px 40px 40px 40px; text-align: center; position: relative;">
-                      <!-- Subtle floral corner accent -->
-                      <div style="position: absolute; top: 15px; right: 15px; opacity: 0.15; font-size: 40px;">🌸</div>
-                      <div style="position: absolute; bottom: 15px; left: 15px; opacity: 0.15; font-size: 40px;">🌿</div>
-                      
-                      <h1 style="margin: 0; color: #d4a5a5; font-size: 36px; font-weight: 300; letter-spacing: 3px; font-family: 'Georgia', serif;">
-                        Goodness Glamour
-                      </h1>
-                      <p style="margin: 8px 0 0 0; color: #b8a0a0; font-size: 15px; font-weight: 400; letter-spacing: 2px; font-family: 'Georgia', serif;">
-                        Ladies & Kids Salon
-                      </p>
-                      <div style="margin-top: 25px; padding: 10px 30px; background-color: rgba(255,255,255,0.7); border-radius: 20px; display: inline-block; border: 1px solid rgba(212,165,165,0.2);">
-                        <p style="margin: 0; color: #c9a0a0; font-size: 13px; font-weight: 500; letter-spacing: 1px;">
-                          💐 Booking Confirmed
-                        </p>
-                      </div>
-                    </td>
-                  </tr>
-                  
-                  <!-- Content Section -->
-                  <tr>
-                    <td style="padding: 40px;">
-                      
-                      <!-- Welcome Message -->
-                      <div style="background: linear-gradient(135deg, #fff5f0 0%, #fff8f5 100%); padding: 25px 30px; border-radius: 18px; margin-bottom: 30px; border: 1px solid #ffe8e0; box-shadow: 0 4px 16px rgba(255,200,180,0.1); text-align: center;">
-                        <h2 style="margin: 0 0 10px 0; color: #c88080; font-size: 24px; font-weight: 400; font-family: 'Georgia', serif;">Dear ${booking.customerName},</h2>
-                        <p style="margin: 0; color: #d4a5a5; font-size: 16px; font-weight: 400; line-height: 1.6;">
-                          Your appointment has been successfully confirmed! We're excited to pamper you with our premium beauty services.
-                        </p>
-                      </div>
-                      
-                      <!-- Booking Details -->
-                      <div style="background: linear-gradient(135deg, #f8f5ff 0%, #faf7ff 100%); padding: 30px; border-radius: 18px; margin-bottom: 30px; border: 1px solid #f0e8ff; box-shadow: 0 4px 16px rgba(200,180,220,0.08);">
-                        <h3 style="margin: 0 0 25px 0; color: #a88cb8; font-size: 16px; font-weight: 500; letter-spacing: 1px; font-family: 'Georgia', serif; border-bottom: 1px solid rgba(200,180,220,0.2); padding-bottom: 12px;">
-                          Your Appointment Details
-                        </h3>
-                        
-                        <!-- Date & Time -->
-                        <div style="background-color: #ffffff; padding: 18px 20px; border-radius: 14px; margin-bottom: 15px; border-left: 3px solid #d4b5d4; box-shadow: 0 2px 8px rgba(0,0,0,0.03);">
-                          <table width="100%" cellpadding="0" cellspacing="0">
-                            <tr>
-                              <td width="35" valign="middle">
-                                <span style="font-size: 20px; opacity: 0.7;">📅</span>
-                              </td>
-                              <td>
-                                <p style="margin: 0 0 4px 0; color: #b8a0b8; font-size: 11px; font-weight: 500; text-transform: uppercase; letter-spacing: 1px;">Date & Time</p>
-                                <p style="margin: 0; color: #9880a8; font-size: 16px; font-weight: 500; font-family: 'Georgia', serif;">${new Date(booking.appointmentDate).toLocaleDateString('en-IN', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })} at ${booking.appointmentTime}</p>
-                              </td>
-                            </tr>
-                          </table>
-                        </div>
-                        
-                        <!-- Services -->
-                        <div style="background-color: #ffffff; padding: 18px 20px; border-radius: 14px; margin-bottom: 15px; border-left: 3px solid #d4b5d4; box-shadow: 0 2px 8px rgba(0,0,0,0.03);">
-                          <table width="100%" cellpadding="0" cellspacing="0">
-                            <tr>
-                              <td width="35" valign="middle">
-                                <span style="font-size: 20px; opacity: 0.7;">✨</span>
-                              </td>
-                              <td>
-                                <p style="margin: 0 0 4px 0; color: #b8a0b8; font-size: 11px; font-weight: 500; text-transform: uppercase; letter-spacing: 1px;">Services</p>
-                                <p style="margin: 0; color: #9880a8; font-size: 16px; font-weight: 500; font-family: 'Georgia', serif;">${booking.services}</p>
-                              </td>
-                            </tr>
-                          </table>
-                        </div>
-                        
-                        <!-- Location -->
-                        <div style="background-color: #ffffff; padding: 18px 20px; border-radius: 14px; margin-bottom: 15px; border-left: 3px solid #d4b5d4; box-shadow: 0 2px 8px rgba(0,0,0,0.03);">
-                          <table width="100%" cellpadding="0" cellspacing="0">
-                            <tr>
-                              <td width="35" valign="middle">
-                                <span style="font-size: 20px; opacity: 0.7;">📍</span>
-                              </td>
-                              <td>
-                                <p style="margin: 0 0 4px 0; color: #b8a0b8; font-size: 11px; font-weight: 500; text-transform: uppercase; letter-spacing: 1px;">Location</p>
-                                <p style="margin: 0; color: #9880a8; font-size: 16px; font-weight: 500; font-family: 'Georgia', serif;">${booking.notes || 'No location specified'}</p>
-                              </td>
-                            </tr>
-                          </table>
-                        </div>
-                        
-                        <!-- Total Amount -->
-                        <div style="background-color: #ffffff; padding: 18px 20px; border-radius: 14px; border-left: 3px solid #d4b5d4; box-shadow: 0 2px 8px rgba(0,0,0,0.03);">
-                          <table width="100%" cellpadding="0" cellspacing="0">
-                            <tr>
-                              <td width="35" valign="middle">
-                                <span style="font-size: 20px; opacity: 0.7;">💰</span>
-                              </td>
-                              <td>
-                                <p style="margin: 0 0 4px 0; color: #b8a0b8; font-size: 11px; font-weight: 500; text-transform: uppercase; letter-spacing: 1px;">Total Amount</p>
-                                <p style="margin: 0; color: #9880a8; font-size: 16px; font-weight: 500; font-family: 'Georgia', serif;">₹${booking.totalAmount}</p>
-                              </td>
-                            </tr>
-                          </table>
-                        </div>
-                      </div>
-                      
-                      <!-- Important Notes -->
-                      <div style="background: linear-gradient(135deg, #fff0f5 0%, #fff5f0 100%); padding: 25px 30px; border-radius: 18px; margin-bottom: 30px; border: 1px solid #ffe0e8; box-shadow: 0 4px 16px rgba(255,180,200,0.08);">
-                        <h3 style="margin: 0 0 15px 0; color: #c880a0; font-size: 16px; font-weight: 500; letter-spacing: 1px; font-family: 'Georgia', serif;">
-                          📝 Important Reminders
-                        </h3>
-                        <ul style="margin: 0; padding-left: 20px; color: #b880a0; font-size: 14px; line-height: 1.8;">
-                          <li>Please arrive 10 minutes before your scheduled time</li>
-                          <li>Bring a valid ID for verification</li>
-                          <li>For any changes, please contact us at least 2 hours in advance</li>
-                          <li>We offer doorstep service - our team will arrive at your specified location</li>
-                        </ul>
-                      </div>
-                      
-                      <!-- Contact Information -->
-                      <div style="background: linear-gradient(135deg, #f0f8ff 0%, #f5faff 100%); padding: 25px 30px; border-radius: 18px; border: 1px solid #e0e8ff; box-shadow: 0 4px 16px rgba(180,200,255,0.08);">
-                        <h3 style="margin: 0 0 20px 0; color: #8080c0; font-size: 16px; font-weight: 500; letter-spacing: 1px; font-family: 'Georgia', serif; text-align: center;">
-                          📞 Need Help?
-                        </h3>
-                        <div style="text-align: center;">
-                          <p style="margin: 0 0 8px 0; color: #a0a0d0; font-size: 14px; font-weight: 400;">Call us: <strong style="color: #8080c0;">+91 9876543210</strong></p>
-                          <p style="margin: 0; color: #a0a0d0; font-size: 14px; font-weight: 400;">Email: <strong style="color: #8080c0;">2akonsultant@gmail.com</strong></p>
-                        </div>
-                      </div>
-                      
-                    </td>
-                  </tr>
-                  
-                  <!-- Footer -->
-                  <tr>
-                    <td style="background: linear-gradient(135deg, #f8f5f0 0%, #faf7f5 100%); padding: 30px 40px; text-align: center; border-top: 1px solid rgba(212,165,165,0.1);">
-                      <p style="margin: 0; color: #d4a5a5; font-size: 14px; font-weight: 400; line-height: 1.6; font-family: 'Georgia', serif;">
-                        Thank you for choosing <strong style="color: #c88080;">Goodness Glamour Salon</strong>!<br>
-                        We look forward to making you feel beautiful and confident.
-                      </p>
-                      <p style="margin: 20px 0 0 0; color: #c0c0c0; font-size: 11px; letter-spacing: 0.5px;">
-                        Automated confirmation • Goodness Glamour Salon<br>
-                        Your booking details have been saved
-                      </p>
-                      <!-- Subtle floral footer accent -->
-                      <p style="margin: 15px 0 0 0; opacity: 0.2; font-size: 20px;">🌸 🌿 🌸</p>
-                    </td>
-                  </tr>
-                  
-                </table>
-                
-              </td>
-            </tr>
-          </table>
-          
-        </body>
-        </html>
-      `,
-    };
+    if (!isEmailJSConfigured()) {
+      console.error(
+        '❌ Skipping customer confirmation email: EmailJS is not configured (missing service/template/public key).'
+      );
+      return false;
+    }
 
-    const result = await retryEmailSend(
-      async () => {
-        return await sendEmailWithPortFallback(mailOptions, 'customer booking confirmation email');
-      },
-      'customer booking confirmation email',
-      2
-    );
-
-    console.log(`✅ Customer booking confirmation sent successfully to ${booking.customerEmail}`);
-    console.log(`📧 Email result:`, result.messageId);
-    return true;
+    const success = await sendCustomerEmailViaEmailJS(booking);
+    console.log(`📧 EmailJS customer booking confirmation result: ${success}`);
+    return success;
   } catch (error) {
-    logEmailError('Error sending customer booking confirmation', error);
+    logEmailError('Error sending customer booking confirmation via EmailJS', error);
     return false;
   }
 }
