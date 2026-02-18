@@ -50,8 +50,15 @@ const createTransporter = () => {
       pass,
     },
     requireTLS: true,
-    connectionTimeout: 10000,
-    greetingTimeout: 10000,
+    connectionTimeout: 30000, // Increased to 30 seconds
+    greetingTimeout: 30000,   // Increased to 30 seconds
+    socketTimeout: 30000,     // Added socket timeout
+    tls: {
+      rejectUnauthorized: true, // Verify SSL certificates
+    },
+    pool: true, // Use connection pooling for better reliability
+    maxConnections: 1,
+    maxMessages: 3,
   });
 
   return transporter;
@@ -237,11 +244,19 @@ export async function sendContactEmail(contact: ContactMessage): Promise<boolean
       `,
     };
 
-    await transporter.sendMail(mailOptions);
+    await retryEmailSend(
+      async () => {
+        return await transporter.sendMail(mailOptions);
+      },
+      'contact email',
+      2
+    );
+
     console.log('✅ Email sent successfully to 2akonsultant@gmail.com');
     return true;
   } catch (error) {
     console.error('❌ Error sending email:', error);
+    logEmailError('Error sending contact email', error);
     return false;
   }
 }
@@ -346,11 +361,77 @@ export async function processContactMessage(contact: ContactMessage): Promise<{
 const logEmailError = (context: string, error: unknown) => {
   const err = error instanceof Error ? error : new Error(String(error));
   const msg = err.message || '';
+  const errCode = (err as any).code || '';
+  
   console.error(`❌ ${context}:`, msg);
-  if (msg.includes('Invalid login') || msg.includes('EAUTH') || msg.includes('authentication')) {
+  
+  // Check for timeout errors
+  if (msg.includes('timeout') || msg.includes('Timeout') || msg.includes('ETIMEDOUT') || errCode === 'ETIMEDOUT') {
+    console.error('   → Connection timeout detected. Possible causes:');
+    console.error('      • Network connectivity issues');
+    console.error('      • Firewall blocking SMTP port 587');
+    console.error('      • Gmail SMTP server temporarily unavailable');
+    console.error('      • VPN or proxy interfering with connection');
+    console.error('   → Try: Check internet connection, firewall settings, or retry later');
+  }
+  
+  // Check for connection errors
+  if (msg.includes('ECONNREFUSED') || msg.includes('ENOTFOUND') || errCode === 'ECONNREFUSED' || errCode === 'ENOTFOUND') {
+    console.error('   → Connection refused. Check:');
+    console.error('      • Internet connectivity');
+    console.error('      • Firewall allows outbound connections on port 587');
+    console.error('      • DNS resolution for smtp.gmail.com');
+  }
+  
+  // Check for authentication errors
+  if (msg.includes('Invalid login') || msg.includes('EAUTH') || msg.includes('authentication') || errCode === 'EAUTH') {
     console.error('   → Gmail auth failed. Use App Password (not regular password): https://myaccount.google.com/apppasswords');
     console.error('   → Set EMAIL_PASSWORD=your-app-password in .env');
   }
+};
+
+// Helper function to retry email sending with exponential backoff
+const retryEmailSend = async <T>(
+  emailFunction: () => Promise<T>,
+  context: string,
+  maxRetries: number = 2
+): Promise<T> => {
+  let lastError: any;
+  
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      return await emailFunction();
+    } catch (error: any) {
+      lastError = error;
+      const err = error instanceof Error ? error : new Error(String(error));
+      const msg = err.message || '';
+      const errCode = error?.code || '';
+      
+      // Check if error is retryable (timeout, connection errors)
+      const isRetryable = 
+        msg.includes('timeout') || 
+        msg.includes('Timeout') || 
+        msg.includes('ETIMEDOUT') || 
+        errCode === 'ETIMEDOUT' ||
+        msg.includes('ECONNREFUSED') ||
+        errCode === 'ECONNREFUSED' ||
+        msg.includes('ENOTFOUND') ||
+        errCode === 'ENOTFOUND';
+      
+      if (isRetryable && attempt < maxRetries) {
+        const delay = Math.min(1000 * Math.pow(2, attempt - 1), 5000); // Exponential backoff, max 5s
+        console.log(`   ⏳ Retrying ${context} (attempt ${attempt + 1}/${maxRetries}) after ${delay}ms...`);
+        await new Promise(resolve => setTimeout(resolve, delay));
+        continue;
+      }
+      
+      // If not retryable or max retries reached, throw the error
+      throw error;
+    }
+  }
+  
+  // This should never be reached, but TypeScript needs it
+  throw lastError || new Error(`Failed to send ${context} after ${maxRetries} attempts`);
 };
 
 // Send booking confirmation email
@@ -590,7 +671,14 @@ export async function sendBookingEmail(booking: BookingData): Promise<boolean> {
       `,
     };
 
-    await transporter.sendMail(mailOptions);
+    await retryEmailSend(
+      async () => {
+        return await transporter.sendMail(mailOptions);
+      },
+      'admin booking email',
+      2
+    );
+
     console.log('✅ Booking confirmation email sent successfully to 2akonsultant@gmail.com');
     return true;
   } catch (error) {
@@ -802,7 +890,14 @@ export async function sendCustomerBookingConfirmation(booking: BookingData): Pro
       `,
     };
 
-    const result = await transporter.sendMail(mailOptions);
+    const result = await retryEmailSend(
+      async () => {
+        return await transporter.sendMail(mailOptions);
+      },
+      'customer booking confirmation email',
+      2
+    );
+
     console.log(`✅ Customer booking confirmation sent successfully to ${booking.customerEmail}`);
     console.log(`📧 Email result:`, result.messageId);
     return true;
