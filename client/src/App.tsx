@@ -90,10 +90,7 @@ function App() {
         <div className="min-h-screen bg-background">
           <Router />
           <Toaster />
-          <WhatsAppChat 
-            phoneNumber="9424309363"
-            message="How can I help you?"
-          />
+          <WhatsAppChat />
         </div>
       </TooltipProvider>
     </QueryClientProvider>
