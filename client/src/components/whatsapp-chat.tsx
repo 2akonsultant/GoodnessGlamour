@@ -1,18 +1,14 @@
 import React from 'react';
 
 interface WhatsAppChatProps {
-  phoneNumber?: string;
-  message?: string;
+  groupLink?: string;
 }
 
 const WhatsAppChat: React.FC<WhatsAppChatProps> = ({
-  phoneNumber = '9424309363',
-  message = 'How can I help you?'
+  groupLink = 'https://chat.whatsapp.com/HI30oDCaeVLHdWyjs09kDP'
 }) => {
   const openWhatsApp = () => {
-    const encodedMessage = encodeURIComponent(message);
-    const whatsappUrl = `https://wa.me/${phoneNumber}?text=${encodedMessage}`;
-    window.open(whatsappUrl, '_blank');
+    window.open(groupLink, '_blank');
   };
 
 
@@ -22,7 +18,7 @@ const WhatsAppChat: React.FC<WhatsAppChatProps> = ({
       <button
         onClick={openWhatsApp}
         className="group flex items-center justify-center w-14 h-14 sm:w-16 sm:h-16 bg-gradient-to-r from-[#25D366] to-[#128C7E] hover:from-[#128C7E] hover:to-[#25D366] text-white rounded-full shadow-lg hover:shadow-xl transition-all duration-300 transform hover:scale-110 focus:outline-none focus:ring-4 focus:ring-green-300 animate-float whatsapp-hover-glow whatsapp-button-mobile"
-        aria-label="Chat with us on WhatsApp"
+        aria-label="Join our WhatsApp Group"
       >
         <svg 
           className="w-7 h-7 sm:w-8 sm:h-8 transition-transform duration-300"
@@ -36,7 +32,7 @@ const WhatsAppChat: React.FC<WhatsAppChatProps> = ({
 
       {/* Tooltip */}
       <div className="absolute right-0 bottom-full mb-2 px-3 py-1 bg-gray-900 text-white text-sm rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-200 whitespace-nowrap">
-        Chat with us on WhatsApp
+        Join our WhatsApp Group
         <div className="absolute top-full right-4 w-0 h-0 border-l-4 border-r-4 border-t-4 border-transparent border-t-gray-900"></div>
       </div>
 
