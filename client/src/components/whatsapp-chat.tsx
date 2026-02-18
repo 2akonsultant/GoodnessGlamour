@@ -8,7 +8,13 @@ const WhatsAppChat: React.FC<WhatsAppChatProps> = ({
   groupLink = 'https://chat.whatsapp.com/HI30oDCaeVLHdWyjs09kDP'
 }) => {
   const openWhatsApp = () => {
-    window.open(groupLink, '_blank');
+    console.log('WhatsApp button clicked, opening:', groupLink);
+    // Use window.location.href for better compatibility, or window.open
+    if (window.open) {
+      window.open(groupLink, '_blank', 'noopener,noreferrer');
+    } else {
+      window.location.href = groupLink;
+    }
   };
 
 
