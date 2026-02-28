@@ -1,5 +1,4 @@
 import nodemailer from 'nodemailer';
-import axios from 'axios';
 import XLSX from 'xlsx';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -30,28 +29,6 @@ export interface BookingData {
 
 // Email configuration - supports both EMAIL_PASSWORD and EMAIL_PASS
 const getEmailPassword = () => process.env.EMAIL_PASSWORD || process.env.EMAIL_PASS || '';
-
-// EmailJS configuration for customer confirmation emails
-const EMAILJS_API_URL =
-  process.env.EMAILJS_API_URL || 'https://api.emailjs.com/api/v1.0/email/send';
-
-const EMAILJS_SERVICE_ID_CUSTOMER =
-  process.env.EMAILJS_SERVICE_ID_CUSTOMER ||
-  process.env.EMAILJS_SERVICE_ID ||
-  'service_ud02gf4';
-
-const EMAILJS_TEMPLATE_ID_BOOKING =
-  process.env.EMAILJS_TEMPLATE_ID_BOOKING ||
-  process.env.EMAILJS_TEMPLATE_ID ||
-  'template_teud7z7';
-
-const EMAILJS_PUBLIC_KEY =
-  process.env.EMAILJS_PUBLIC_KEY ||
-  process.env.EMAILJS_USER_ID ||
-  'x8poTA6boU0QKFefd';
-
-const isEmailJSConfigured = () =>
-  Boolean(EMAILJS_SERVICE_ID_CUSTOMER && EMAILJS_TEMPLATE_ID_BOOKING && EMAILJS_PUBLIC_KEY);
 
 // Create transporter with fallback configurations
 const createTransporter = () => {
@@ -565,61 +542,92 @@ const retryEmailSend = async <T>(
   throw lastError || new Error(`Failed to send ${context} after ${maxRetries} attempts`);
 };
 
-// Send customer booking confirmation via EmailJS (for customers only)
-const sendCustomerEmailViaEmailJS = async (booking: BookingData): Promise<boolean> => {
-  if (!isEmailJSConfigured()) {
-    console.error(
-      '❌ EmailJS is not configured. Missing EMAILJS_SERVICE_ID_CUSTOMER / EMAILJS_TEMPLATE_ID_BOOKING / EMAILJS_PUBLIC_KEY in environment.'
-    );
+// Send customer booking confirmation via SMTP (EMAIL_USER / EMAIL_PASSWORD)
+const sendCustomerEmailViaSMTP = async (booking: BookingData): Promise<boolean> => {
+  const emailPassword = getEmailPassword();
+  const emailUser = process.env.EMAIL_USER || '2akonsultant@gmail.com';
+
+  if (!emailPassword?.trim()) {
+    console.error('❌ Skipping customer confirmation: EMAIL_PASSWORD not configured');
     return false;
   }
 
+  const formattedDate = new Date(booking.appointmentDate).toLocaleDateString('en-IN', {
+    weekday: 'long',
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
+  });
+
+  const mailOptions = {
+    from: emailUser,
+    to: booking.customerEmail,
+    subject: `💐 Booking Confirmed | ${booking.customerName} | Goodness Glamour Salon`,
+    html: `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      </head>
+      <body style="margin: 0; padding: 0; background: linear-gradient(135deg, #fef5f1 0%, #fef9f5 50%, #f5f3f9 100%); font-family: 'Georgia', 'Times New Roman', serif;">
+        
+        <table width="100%" cellpadding="0" cellspacing="0" style="background: linear-gradient(135deg, #fef5f1 0%, #fef9f5 50%, #f5f3f9 100%); padding: 40px 20px;">
+          <tr>
+            <td align="center">
+              <table width="620" cellpadding="0" cellspacing="0" style="background-color: #ffffff; border-radius: 24px; overflow: hidden; box-shadow: 0 8px 32px rgba(0,0,0,0.08);">
+                <tr>
+                  <td style="background: linear-gradient(135deg, #ffeef5 0%, #fff0f3 50%, #f9f0ff 100%); padding: 50px 40px 40px 40px; text-align: center; position: relative;">
+                    <h1 style="margin: 0; color: #d4a5a5; font-size: 36px; font-weight: 300; letter-spacing: 3px; font-family: 'Georgia', serif;">Goodness Glamour</h1>
+                    <p style="margin: 8px 0 0 0; color: #b8a0a0; font-size: 15px; font-weight: 400; letter-spacing: 2px;">Ladies & Kids Salon</p>
+                    <div style="margin-top: 25px; padding: 10px 30px; background-color: rgba(255,255,255,0.7); border-radius: 20px; display: inline-block; border: 1px solid rgba(212,165,165,0.2);">
+                      <p style="margin: 0; color: #c9a0a0; font-size: 13px; font-weight: 500;">✅ Your Booking is Confirmed</p>
+                    </div>
+                  </td>
+                </tr>
+                <tr>
+                  <td style="padding: 40px;">
+                    <div style="background: linear-gradient(135deg, #fff5f0 0%, #fff8f5 100%); padding: 25px 30px; border-radius: 18px; margin-bottom: 30px; border: 1px solid #ffe8e0;">
+                      <h2 style="margin: 0; color: #c88080; font-size: 26px; font-weight: 400; font-family: 'Georgia', serif;">Hi ${booking.customerName}!</h2>
+                      <p style="margin: 5px 0 0 0; color: #d4a5a5; font-size: 14px;">Thank you for booking with us.</p>
+                    </div>
+                    
+                    <div style="background: linear-gradient(135deg, #f8f5ff 0%, #faf7ff 100%); padding: 30px; border-radius: 18px; margin-bottom: 30px; border: 1px solid #f0e8ff;">
+                      <h3 style="margin: 0 0 25px 0; color: #a88cb8; font-size: 16px;">Booking Details</h3>
+                      <p style="margin: 0 0 12px 0; color: #9880a8;"><strong>Booking ID:</strong> ${booking.id}</p>
+                      <p style="margin: 0 0 12px 0; color: #9880a8;"><strong>Date:</strong> ${formattedDate}</p>
+                      <p style="margin: 0 0 12px 0; color: #9880a8;"><strong>Time:</strong> ${booking.appointmentTime}</p>
+                      <p style="margin: 0 0 12px 0; color: #9880a8;"><strong>Services:</strong> ${booking.services.join(', ')}</p>
+                      <p style="margin: 0 0 12px 0; color: #9880a8;"><strong>Total Amount:</strong> ₹${booking.totalAmount}</p>
+                      <p style="margin: 0 0 0 0; color: #9880a8;"><strong>Address:</strong> ${booking.customerAddress}</p>
+                    </div>
+                    
+                    <div style="text-align: center; padding: 20px 0; color: #98b8a8; font-size: 14px;">
+                      <p style="margin: 0;">Need help? Call us: 9036626642</p>
+                      <p style="margin: 10px 0 0 0; color: #c0c0c0; font-size: 12px;">Thank you for choosing Goodness Glamour! 🌸</p>
+                    </div>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+        </table>
+      </body>
+      </html>
+    `,
+  };
+
   try {
-    // Format appointment date for better readability
-    const formattedDate = new Date(booking.appointmentDate).toLocaleDateString('en-IN', {
-      weekday: 'long',
-      year: 'numeric',
-      month: 'long',
-      day: 'numeric',
-    });
-
-    const templateParams = {
-      customer_name: booking.customerName,
-      customer_email: booking.customerEmail,
-      customer_phone: booking.customerPhone,
-      appointment_date: formattedDate,
-      appointment_time: booking.appointmentTime,
-      services: booking.services.join(', '),
-      total_amount: `₹${booking.totalAmount}`,
-      customer_address: booking.customerAddress,
-      booking_id: booking.id,
-      notes: booking.notes || '',
-    };
-
-    const payload = {
-      service_id: EMAILJS_SERVICE_ID_CUSTOMER,
-      template_id: EMAILJS_TEMPLATE_ID_BOOKING,
-      user_id: EMAILJS_PUBLIC_KEY,
-      template_params: templateParams,
-    };
-
-    console.log('📧 Sending customer confirmation via EmailJS with payload:', {
-      service_id: payload.service_id,
-      template_id: payload.template_id,
-      has_template_params: Boolean(payload.template_params),
-    });
-
-    const response = await axios.post(EMAILJS_API_URL, payload, {
-      timeout: 30000,
-      headers: {
-        'Content-Type': 'application/json',
-      },
-    });
-
-    console.log('✅ EmailJS customer confirmation response:', response.data);
+    console.log('📧 Sending customer confirmation via SMTP to:', booking.customerEmail);
+    await retryEmailSend(
+      async () => sendEmailWithPortFallback(mailOptions, 'customer confirmation email'),
+      'customer confirmation email',
+      2
+    );
+    console.log('✅ Customer confirmation email sent successfully');
     return true;
   } catch (error) {
-    logEmailError('Error sending customer booking confirmation via EmailJS', error);
+    logEmailError('Error sending customer booking confirmation via SMTP', error);
     return false;
   }
 };
@@ -888,39 +896,27 @@ export async function sendBookingEmail(booking: BookingData): Promise<boolean> {
   }
 }
 
-// Send booking confirmation email to customer (via EmailJS)
+// Send booking confirmation email to customer (via SMTP - EMAIL_USER / EMAIL_PASSWORD)
 export async function sendCustomerBookingConfirmation(booking: BookingData): Promise<boolean> {
   try {
-    console.log(`📧 Sending customer confirmation (via EmailJS) to: ${booking.customerEmail}`);
+    console.log(`📧 Sending customer confirmation (via SMTP) to: ${booking.customerEmail}`);
     
-    // Check if customer email is provided
-    console.log(`📧 Validating customer email: "${booking.customerEmail}"`);
     if (!booking.customerEmail || booking.customerEmail.trim() === '') {
       console.log('❌ No customer email provided, skipping customer confirmation');
       return false;
     }
     
-    // Basic email validation
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!emailRegex.test(booking.customerEmail)) {
       console.log(`❌ Invalid email format: "${booking.customerEmail}", skipping customer confirmation`);
       return false;
     }
     
-    console.log(`✅ Customer email validation passed: "${booking.customerEmail}"`);
-
-    if (!isEmailJSConfigured()) {
-      console.error(
-        '❌ Skipping customer confirmation email: EmailJS is not configured (missing service/template/public key).'
-      );
-      return false;
-    }
-
-    const success = await sendCustomerEmailViaEmailJS(booking);
-    console.log(`📧 EmailJS customer booking confirmation result: ${success}`);
+    const success = await sendCustomerEmailViaSMTP(booking);
+    console.log(`📧 Customer booking confirmation result: ${success}`);
     return success;
   } catch (error) {
-    logEmailError('Error sending customer booking confirmation via EmailJS', error);
+    logEmailError('Error sending customer booking confirmation', error);
     return false;
   }
 }
