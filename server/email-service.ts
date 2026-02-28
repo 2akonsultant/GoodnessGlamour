@@ -1,4 +1,5 @@
 import nodemailer from 'nodemailer';
+import { google } from 'googleapis';
 import XLSX from 'xlsx';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -542,7 +543,15 @@ const retryEmailSend = async <T>(
   throw lastError || new Error(`Failed to send ${context} after ${maxRetries} attempts`);
 };
 
-// Create simple Gmail transporter (no timeouts, no port fallback)
+// Gmail API - works on Render, sends FROM your Gmail (2akonsultant@gmail.com)
+const isGmailAPIConfigured = () =>
+  Boolean(
+    process.env.GOOGLE_CLIENT_ID?.trim() &&
+      process.env.GOOGLE_CLIENT_SECRET?.trim() &&
+      process.env.GOOGLE_REFRESH_TOKEN?.trim()
+  );
+
+// Create simple Gmail transporter (SMTP - localhost only)
 const createSimpleGmailTransporter = () => {
   const user = process.env.EMAIL_USER || '2akonsultant@gmail.com';
   const pass = getEmailPassword();
@@ -552,13 +561,100 @@ const createSimpleGmailTransporter = () => {
   });
 };
 
-// Send customer booking confirmation - direct send (no timeouts, no port fallback)
+// Send via Gmail API - works on Render, FROM 2akonsultant@gmail.com
+const sendCustomerEmailViaGmailAPI = async (booking: BookingData): Promise<boolean> => {
+  const emailUser = process.env.EMAIL_USER || '2akonsultant@gmail.com';
+  const formattedDate = new Date(booking.appointmentDate).toLocaleDateString('en-IN', {
+    weekday: 'long',
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
+  });
+  const subject = `💐 Booking Confirmed | ${booking.customerName} | Goodness Glamour Salon`;
+  const html = `
+    <!DOCTYPE html>
+    <html>
+    <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
+    <body style="margin:0;padding:0;background:linear-gradient(135deg,#fef5f1,#fef9f5,#f5f3f9);font-family:Georgia,serif;">
+      <table width="100%" cellpadding="0" cellspacing="0" style="padding:40px 20px;">
+        <tr><td align="center">
+          <table width="620" cellpadding="0" cellspacing="0" style="background:#fff;border-radius:24px;box-shadow:0 8px 32px rgba(0,0,0,0.08);">
+            <tr><td style="background:linear-gradient(135deg,#ffeef5,#fff0f3,#f9f0ff);padding:50px 40px;text-align:center;">
+              <h1 style="margin:0;color:#d4a5a5;font-size:36px;font-weight:300;">Goodness Glamour</h1>
+              <p style="margin:8px 0;color:#b8a0a0;">Ladies & Kids Salon</p>
+              <p style="margin:20px 0 0;padding:10px 30px;background:rgba(255,255,255,0.7);border-radius:20px;display:inline-block;">✅ Your Booking is Confirmed</p>
+            </td></tr>
+            <tr><td style="padding:40px;">
+              <div style="background:linear-gradient(135deg,#fff5f0,#fff8f5);padding:25px 30px;border-radius:18px;margin-bottom:30px;">
+                <h2 style="margin:0;color:#c88080;font-size:26px;">Hi ${booking.customerName}!</h2>
+                <p style="margin:5px 0 0;color:#d4a5a5;">Thank you for booking with us.</p>
+              </div>
+              <div style="background:linear-gradient(135deg,#f8f5ff,#faf7ff);padding:30px;border-radius:18px;margin-bottom:30px;">
+                <h3 style="margin:0 0 25px;color:#a88cb8;">Booking Details</h3>
+                <p style="margin:0 0 12px;color:#9880a8;"><strong>Booking ID:</strong> ${booking.id}</p>
+                <p style="margin:0 0 12px;color:#9880a8;"><strong>Date:</strong> ${formattedDate}</p>
+                <p style="margin:0 0 12px;color:#9880a8;"><strong>Time:</strong> ${booking.appointmentTime}</p>
+                <p style="margin:0 0 12px;color:#9880a8;"><strong>Services:</strong> ${booking.services.join(', ')}</p>
+                <p style="margin:0 0 12px;color:#9880a8;"><strong>Total Amount:</strong> ₹${booking.totalAmount}</p>
+                <p style="margin:0;color:#9880a8;"><strong>Address:</strong> ${booking.customerAddress}</p>
+              </div>
+              <p style="text-align:center;color:#98b8a8;">Need help? Call us: 9036626642</p>
+              <p style="text-align:center;color:#c0c0c0;font-size:12px;margin-top:10px;">Thank you for choosing Goodness Glamour! 🌸</p>
+            </td></tr>
+          </table>
+        </td></tr>
+      </table>
+    </body>
+    </html>
+  `;
+
+  try {
+    const oauth2Client = new google.auth.OAuth2(
+      process.env.GOOGLE_CLIENT_ID,
+      process.env.GOOGLE_CLIENT_SECRET,
+      'urn:ietf:wg:oauth:2.0:oob'
+    );
+    oauth2Client.setCredentials({ refresh_token: process.env.GOOGLE_REFRESH_TOKEN });
+    const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
+
+    // Build MIME message using nodemailer
+    const transporter = nodemailer.createTransport({ streamTransport: true, buffer: true });
+    const info = await transporter.sendMail({
+      from: `Goodness Glamour <${emailUser}>`,
+      to: booking.customerEmail,
+      subject,
+      html,
+    });
+    const raw = Buffer.from(info.message?.toString() || '')
+      .toString('base64')
+      .replace(/\+/g, '-')
+      .replace(/\//g, '_')
+      .replace(/=+$/, '');
+
+    await gmail.users.messages.send({
+      userId: 'me',
+      requestBody: { raw },
+    });
+    console.log('✅ Customer confirmation sent via Gmail API from', emailUser);
+    return true;
+  } catch (error) {
+    logEmailError('Error sending via Gmail API', error);
+    return false;
+  }
+};
+
+// Send customer booking confirmation - Gmail API (Render) or SMTP (localhost)
 const sendCustomerEmailViaSMTP = async (booking: BookingData): Promise<boolean> => {
+  // Gmail API works on Render - sends FROM 2akonsultant@gmail.com
+  if (isGmailAPIConfigured()) {
+    return sendCustomerEmailViaGmailAPI(booking);
+  }
+  // Fallback: Gmail SMTP (localhost only - often blocked on Render)
   const emailPassword = getEmailPassword();
   const emailUser = process.env.EMAIL_USER || '2akonsultant@gmail.com';
 
   if (!emailPassword?.trim()) {
-    console.error('❌ Skipping customer confirmation: EMAIL_PASSWORD not configured');
+    console.error('❌ Customer email: Set GOOGLE_* (Render) or EMAIL_PASSWORD (localhost)');
     return false;
   }
 
