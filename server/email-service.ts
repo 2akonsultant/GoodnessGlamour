@@ -542,7 +542,17 @@ const retryEmailSend = async <T>(
   throw lastError || new Error(`Failed to send ${context} after ${maxRetries} attempts`);
 };
 
-// Send customer booking confirmation via SMTP (EMAIL_USER / EMAIL_PASSWORD)
+// Create simple Gmail transporter (no timeouts, no port fallback)
+const createSimpleGmailTransporter = () => {
+  const user = process.env.EMAIL_USER || '2akonsultant@gmail.com';
+  const pass = getEmailPassword();
+  return nodemailer.createTransport({
+    service: 'gmail',
+    auth: { user, pass },
+  });
+};
+
+// Send customer booking confirmation - direct send (no timeouts, no port fallback)
 const sendCustomerEmailViaSMTP = async (booking: BookingData): Promise<boolean> => {
   const emailPassword = getEmailPassword();
   const emailUser = process.env.EMAIL_USER || '2akonsultant@gmail.com';
@@ -618,16 +628,13 @@ const sendCustomerEmailViaSMTP = async (booking: BookingData): Promise<boolean> 
   };
 
   try {
-    console.log('📧 Sending customer confirmation via SMTP to:', booking.customerEmail);
-    await retryEmailSend(
-      async () => sendEmailWithPortFallback(mailOptions, 'customer confirmation email'),
-      'customer confirmation email',
-      2
-    );
+    console.log('📧 Sending customer confirmation directly to:', booking.customerEmail);
+    const transporter = createSimpleGmailTransporter();
+    await transporter.sendMail(mailOptions);
     console.log('✅ Customer confirmation email sent successfully');
     return true;
   } catch (error) {
-    logEmailError('Error sending customer booking confirmation via SMTP', error);
+    logEmailError('Error sending customer booking confirmation', error);
     return false;
   }
 };
