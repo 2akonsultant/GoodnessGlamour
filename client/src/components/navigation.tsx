@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { Link, useLocation } from "wouter";
-import { Menu, X, Calendar, User, Settings, UserPlus, LogOut } from "lucide-react";
+import { Menu, X, Calendar, User, Settings, LogOut } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
@@ -102,17 +102,7 @@ export default function Navigation() {
                   </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
-            ) : (
-              <div className="flex items-center gap-3">
-                <Button
-                  onClick={() => setLocation("/signup")}
-                  className="bg-[#c9a869] text-[#2c1810] hover:bg-[#d4af37]"
-                >
-                  <UserPlus className="h-4 w-4 mr-2" />
-                  Sign Up
-                </Button>
-              </div>
-            )}
+            ) : null}
             
             <Link href="/booking" data-testid="button-book-now">
               <Button className="flex items-center text-lg px-6 py-3 bg-[#c9a869] text-[#2c1810] hover:bg-[#d4af37]">
@@ -180,20 +170,7 @@ export default function Navigation() {
                         Logout
                       </Button>
                     </>
-                  ) : (
-                    <div className="flex flex-col gap-2">
-                      <Button
-                        onClick={() => {
-                          setLocation("/signup");
-                          setIsOpen(false);
-                        }}
-                        className="w-full btn-primary"
-                      >
-                        <UserPlus className="h-4 w-4 mr-2" />
-                        Sign Up
-                      </Button>
-                    </div>
-                  )}
+                  ) : null}
                   
                   <Link href="/booking" onClick={() => setIsOpen(false)} data-testid="button-mobile-book">
                     <Button className="btn-primary w-full flex items-center justify-center text-lg py-3">
