@@ -187,6 +187,56 @@ const sendCustomerEmailViaMailjet = async (booking: BookingData): Promise<boolea
   }
 };
 
+const sendAdminBookingEmailViaMailjet = async (mailOptions: {
+  fromEmail: string;
+  fromName: string;
+  toEmail: string;
+  toName: string;
+  subject: string;
+  html: string;
+}): Promise<boolean> => {
+  const apiKey = process.env.MAILJET_API_KEY || '';
+  const apiSecret = process.env.MAILJET_API_SECRET || '';
+
+  if (!apiKey.trim() || !apiSecret.trim()) {
+    console.error('❌ Mailjet is not configured: MAILJET_API_KEY/MAILJET_API_SECRET missing');
+    return false;
+  }
+
+  try {
+    const auth = Buffer.from(`${apiKey}:${apiSecret}`).toString('base64');
+    const response = await fetch('https://api.mailjet.com/v3.1/send', {
+      method: 'POST',
+      headers: {
+        Authorization: `Basic ${auth}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        Messages: [
+          {
+            From: { Email: mailOptions.fromEmail, Name: mailOptions.fromName },
+            To: [{ Email: mailOptions.toEmail, Name: mailOptions.toName }],
+            Subject: mailOptions.subject,
+            HTMLPart: mailOptions.html,
+          },
+        ],
+      }),
+    });
+
+    const data = await response.json().catch(() => null);
+    if (!response.ok) {
+      console.error('❌ Mailjet send failed:', response.status, data);
+      return false;
+    }
+
+    console.log('✅ Admin booking email sent via Mailjet to', mailOptions.toEmail);
+    return true;
+  } catch (error) {
+    logEmailError('Error sending admin email via Mailjet', error);
+    return false;
+  }
+};
+
 // Create transporter for specific port
 const createTransporterForPort = (port: 465 | 587): nodemailer.Transporter => {
   const user = process.env.EMAIL_USER || '2akonsultant@gmail.com';
@@ -839,26 +889,16 @@ export async function sendBookingEmail(booking: BookingData): Promise<boolean> {
   try {
     const emailPassword = getEmailPassword();
     const emailUser = process.env.EMAIL_USER || '2akonsultant@gmail.com';
+    const adminToEmail = process.env.ADMIN_EMAIL || '2akonsultant@gmail.com';
     
     // Enhanced logging for Render debugging
     console.log('📧 sendBookingEmail called');
     console.log(`📧 EMAIL_USER: ${emailUser}`);
     console.log(`📧 EMAIL_PASSWORD: ${emailPassword ? 'SET (length: ' + emailPassword.length + ')' : 'NOT SET'}`);
     console.log(`📧 EMAIL_PASS (alt): ${process.env.EMAIL_PASS ? 'SET' : 'NOT SET'}`);
-    
-    if (!emailPassword?.trim()) {
-      console.error('❌ Skipping admin booking email: EMAIL_PASSWORD not configured');
-      console.error('   → Check Render Dashboard → Environment Variables');
-      console.error('   → Required: EMAIL_USER and EMAIL_PASSWORD');
-      console.error('   → EMAIL_PASSWORD must be Gmail App Password (16 characters)');
-      return false;
-    }
 
-    const mailOptions = {
-      from: process.env.EMAIL_USER || '2akonsultant@gmail.com',
-      to: '2akonsultant@gmail.com',
-      subject: `💐 New Booking Confirmation | ${booking.customerName} | Goodness Glamour Salon`,
-      html: `
+    const subject = `💐 New Booking Confirmation | ${booking.customerName} | Goodness Glamour Salon`;
+    const html = `
         <!DOCTYPE html>
         <html>
         <head>
@@ -1079,7 +1119,31 @@ export async function sendBookingEmail(booking: BookingData): Promise<boolean> {
           
         </body>
         </html>
-      `,
+      `;
+
+    if (isMailjetConfigured()) {
+      const fromEmail = process.env.MAILJET_FROM_EMAIL || emailUser;
+      const fromName = process.env.MAILJET_FROM_NAME || 'Goodness Glamour';
+      return await sendAdminBookingEmailViaMailjet({
+        fromEmail,
+        fromName,
+        toEmail: adminToEmail,
+        toName: 'Admin',
+        subject,
+        html,
+      });
+    }
+
+    if (!emailPassword?.trim()) {
+      console.error('❌ Skipping admin booking email: MAILJET is not configured and EMAIL_PASSWORD is missing');
+      return false;
+    }
+
+    const mailOptions: nodemailer.SendMailOptions = {
+      from: emailUser,
+      to: adminToEmail,
+      subject,
+      html,
     };
 
     await retryEmailSend(
