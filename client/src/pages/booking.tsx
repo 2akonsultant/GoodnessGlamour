@@ -97,7 +97,7 @@ export default function Booking() {
       queryClient.invalidateQueries({ queryKey: ["/api/bookings"] });
       toast({
         title: "Booking Confirmed!",
-        description: "Your appointment has been successfully scheduled.",
+        description: "Your appointment has been successfully scheduled.Please check your spam mail if its not visible in inbox",
       });
     },
     onError: (error) => {
