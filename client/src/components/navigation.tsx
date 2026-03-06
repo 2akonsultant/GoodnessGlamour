@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { Link, useLocation } from "wouter";
-import { Menu, X, Calendar, User, Settings, LogIn, UserPlus, LogOut } from "lucide-react";
+import { Menu, X, Calendar, User, Settings, UserPlus, LogOut } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
@@ -105,13 +105,6 @@ export default function Navigation() {
             ) : (
               <div className="flex items-center gap-3">
                 <Button
-                  onClick={() => setLocation("/login")}
-                  className="bg-[#c9a869] text-[#2c1810] hover:bg-[#d4af37]"
-                >
-                  <LogIn className="h-4 w-4 mr-2" />
-                  Login
-                </Button>
-                <Button
                   onClick={() => setLocation("/signup")}
                   className="bg-[#c9a869] text-[#2c1810] hover:bg-[#d4af37]"
                 >
@@ -189,16 +182,6 @@ export default function Navigation() {
                     </>
                   ) : (
                     <div className="flex flex-col gap-2">
-                      <Button
-                        onClick={() => {
-                          setLocation("/login");
-                          setIsOpen(false);
-                        }}
-                        className="w-full btn-primary"
-                      >
-                        <LogIn className="h-4 w-4 mr-2" />
-                        Login
-                      </Button>
                       <Button
                         onClick={() => {
                           setLocation("/signup");
