@@ -1,5 +1,4 @@
 import nodemailer from 'nodemailer';
-import { google } from 'googleapis';
 import XLSX from 'xlsx';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -93,6 +92,99 @@ const createTransporter = () => {
     // Disable pooling for better reliability with timeouts
     pool: false,
   } as nodemailer.TransportOptions);
+};
+
+const sendCustomerEmailViaMailjet = async (booking: BookingData): Promise<boolean> => {
+  const apiKey = process.env.MAILJET_API_KEY || '';
+  const apiSecret = process.env.MAILJET_API_SECRET || '';
+
+  if (!apiKey.trim() || !apiSecret.trim()) {
+    console.error('❌ Mailjet is not configured: MAILJET_API_KEY/MAILJET_API_SECRET missing');
+    return false;
+  }
+
+  const fromEmail = process.env.MAILJET_FROM_EMAIL || process.env.EMAIL_USER || '2akonsultant@gmail.com';
+  const fromName = process.env.MAILJET_FROM_NAME || 'Goodness Glamour';
+
+  const formattedDate = new Date(booking.appointmentDate).toLocaleDateString('en-IN', {
+    weekday: 'long',
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
+  });
+
+  const subject = `💐 Booking Confirmed | ${booking.customerName} | Goodness Glamour Salon`;
+  const html = `
+    <!DOCTYPE html>
+    <html>
+    <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
+    <body style="margin:0;padding:0;background:linear-gradient(135deg,#fef5f1,#fef9f5,#f5f3f9);font-family:Georgia,serif;">
+      <table width="100%" cellpadding="0" cellspacing="0" style="padding:40px 20px;">
+        <tr><td align="center">
+          <table width="620" cellpadding="0" cellspacing="0" style="background:#fff;border-radius:24px;box-shadow:0 8px 32px rgba(0,0,0,0.08);overflow:hidden;">
+            <tr><td style="background:linear-gradient(135deg,#ffeef5,#fff0f3,#f9f0ff);padding:50px 40px;text-align:center;">
+              <h1 style="margin:0;color:#d4a5a5;font-size:36px;font-weight:300;letter-spacing:3px;">Goodness Glamour</h1>
+              <p style="margin:8px 0;color:#b8a0a0;letter-spacing:2px;">Ladies & Kids Salon</p>
+              <div style="margin-top:25px;padding:10px 30px;background:rgba(255,255,255,0.7);border-radius:20px;display:inline-block;border:1px solid rgba(212,165,165,0.2);">
+                <p style="margin:0;color:#c9a0a0;font-size:13px;font-weight:500;">✅ Your Booking is Confirmed</p>
+              </div>
+            </td></tr>
+            <tr><td style="padding:40px;">
+              <div style="background:linear-gradient(135deg,#fff5f0,#fff8f5);padding:25px 30px;border-radius:18px;margin-bottom:30px;border:1px solid #ffe8e0;">
+                <h2 style="margin:0;color:#c88080;font-size:26px;font-weight:400;">Hi ${booking.customerName}!</h2>
+                <p style="margin:5px 0 0;color:#d4a5a5;font-size:14px;">Thank you for booking with us.</p>
+              </div>
+              <div style="background:linear-gradient(135deg,#f8f5ff,#faf7ff);padding:30px;border-radius:18px;margin-bottom:30px;border:1px solid #f0e8ff;">
+                <h3 style="margin:0 0 25px;color:#a88cb8;font-size:16px;">Booking Details</h3>
+                <p style="margin:0 0 12px;color:#9880a8;"><strong>Booking ID:</strong> ${booking.id}</p>
+                <p style="margin:0 0 12px;color:#9880a8;"><strong>Date:</strong> ${formattedDate}</p>
+                <p style="margin:0 0 12px;color:#9880a8;"><strong>Time:</strong> ${booking.appointmentTime}</p>
+                <p style="margin:0 0 12px;color:#9880a8;"><strong>Services:</strong> ${booking.services.join(', ')}</p>
+                <p style="margin:0 0 12px;color:#9880a8;"><strong>Total Amount:</strong> ₹${booking.totalAmount}</p>
+                <p style="margin:0;color:#9880a8;"><strong>Address:</strong> ${booking.customerAddress}</p>
+              </div>
+              <p style="text-align:center;color:#98b8a8;">Need help? Call us: 9036626642</p>
+              <p style="text-align:center;color:#c0c0c0;font-size:12px;margin-top:10px;">Thank you for choosing Goodness Glamour! 🌸</p>
+            </td></tr>
+          </table>
+        </td></tr>
+      </table>
+    </body>
+    </html>
+  `;
+
+  try {
+    const auth = Buffer.from(`${apiKey}:${apiSecret}`).toString('base64');
+    const response = await fetch('https://api.mailjet.com/v3.1/send', {
+      method: 'POST',
+      headers: {
+        Authorization: `Basic ${auth}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        Messages: [
+          {
+            From: { Email: fromEmail, Name: fromName },
+            To: [{ Email: booking.customerEmail, Name: booking.customerName }],
+            Subject: subject,
+            HTMLPart: html,
+          },
+        ],
+      }),
+    });
+
+    const data = await response.json().catch(() => null);
+    if (!response.ok) {
+      console.error('❌ Mailjet send failed:', response.status, data);
+      return false;
+    }
+
+    console.log('✅ Customer confirmation sent via Mailjet to', booking.customerEmail);
+    return true;
+  } catch (error) {
+    logEmailError('Error sending via Mailjet', error);
+    return false;
+  }
 };
 
 // Create transporter for specific port
@@ -551,6 +643,12 @@ const isGmailAPIConfigured = () =>
       process.env.GOOGLE_REFRESH_TOKEN?.trim()
   );
 
+const isMailjetConfigured = () =>
+  Boolean(
+    process.env.MAILJET_API_KEY?.trim() &&
+      process.env.MAILJET_API_SECRET?.trim()
+  );
+
 // Create simple Gmail transporter (SMTP - localhost only)
 const createSimpleGmailTransporter = () => {
   const user = process.env.EMAIL_USER || '2akonsultant@gmail.com';
@@ -609,6 +707,7 @@ const sendCustomerEmailViaGmailAPI = async (booking: BookingData): Promise<boole
   `;
 
   try {
+    const { google } = await import('googleapis');
     const oauth2Client = new google.auth.OAuth2(
       process.env.GOOGLE_CLIENT_ID,
       process.env.GOOGLE_CLIENT_SECRET,
@@ -1002,7 +1101,7 @@ export async function sendBookingEmail(booking: BookingData): Promise<boolean> {
 // Send booking confirmation email to customer (via SMTP - EMAIL_USER / EMAIL_PASSWORD)
 export async function sendCustomerBookingConfirmation(booking: BookingData): Promise<boolean> {
   try {
-    console.log(`📧 Sending customer confirmation (via SMTP) to: ${booking.customerEmail}`);
+    console.log(`📧 Sending customer confirmation to: ${booking.customerEmail}`);
     
     if (!booking.customerEmail || booking.customerEmail.trim() === '') {
       console.log('❌ No customer email provided, skipping customer confirmation');
@@ -1015,7 +1114,9 @@ export async function sendCustomerBookingConfirmation(booking: BookingData): Pro
       return false;
     }
     
-    const success = await sendCustomerEmailViaSMTP(booking);
+    const success = isMailjetConfigured()
+      ? await sendCustomerEmailViaMailjet(booking)
+      : await sendCustomerEmailViaSMTP(booking);
     console.log(`📧 Customer booking confirmation result: ${success}`);
     return success;
   } catch (error) {
